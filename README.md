@@ -1,54 +1,54 @@
 # nullscan
 
-Analizador de código estático, rápido y open-source, escrito en Rust. Arranca con soporte
-para TypeScript. Nace como alternativa liviana a SonarQube: sin JVM, con CLI de primera
-clase, y sin las limitaciones de la edición community (análisis de ramas, etc.).
+A fast, open-source static code analyzer written in Rust. Starts with TypeScript support.
+Born as a lightweight alternative to SonarQube: no JVM, first-class CLI, and none of the
+community edition's limitations (branch analysis, etc.).
 
-## Estado actual
+## Current state
 
-PoC funcional: parseo de TypeScript con [tree-sitter](https://tree-sitter.github.io/tree-sitter/)
-y un CLI que corre un set de reglas contra un archivo `.ts`.
+Working PoC: TypeScript parsing via [tree-sitter](https://tree-sitter.github.io/tree-sitter/)
+and a CLI that runs a set of rules against a `.ts` file.
 
-## Estructura
+## Structure
 
 ```
 nullscan/
-├── nullscan-core/   # parsing (tree-sitter-typescript) + reglas
+├── nullscan-core/   # parsing (tree-sitter-typescript) + rules
 └── nullscan-cli/    # CLI (clap)
 ```
 
-## Uso
+## Usage
 
 ```sh
-cargo run -p nullscan-cli -- archivo.ts
+cargo run -p nullscan-cli -- file.ts
 ```
 
-Imprime un diagnóstico por línea (`archivo:línea:columna: [regla] mensaje`) y sale con
-código 1 si encontró algo, 0 si el archivo está limpio.
+Prints one diagnostic per line (`file:line:column: [rule] message`) and exits with
+code 1 if anything was found, 0 if the file is clean.
 
-## Reglas implementadas
+## Implemented rules
 
-| Regla | Qué detecta |
+| Rule | What it detects |
 |---|---|
-| `no-console` | Llamadas a `console.*` |
-| `no-debugger` | Statement `debugger;` |
-| `no-var` | Uso de `var` en vez de `let`/`const` |
-| `eqeqeq` | `==`/`!=` en vez de `===`/`!==` |
-| `no-explicit-any` | Tipo `any` explícito |
-| `no-empty-catch` | Bloque `catch` vacío |
+| `no-console` | Calls to `console.*` |
+| `no-debugger` | `debugger;` statements |
+| `no-var` | `var` instead of `let`/`const` |
+| `eqeqeq` | `==`/`!=` instead of `===`/`!==` |
+| `no-explicit-any` | Explicit `any` type |
+| `no-empty-catch` | Empty `catch` block |
 
-## Desarrollo
+## Development
 
 ```sh
 cargo test --workspace
 ```
 
-Ver [FINDINGS.md](./FINDINGS.md) para gotchas técnicos descubiertos en el camino
-(tree-sitter, arquitectura de reglas, etc.).
+See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
+(tree-sitter, rule architecture, etc.).
 
 ## Roadmap
 
-- Reglas con estado (complejidad ciclomática, variables no usadas, duplicación de código)
-- Output SARIF para integración con CI/editores
-- Análisis multi-archivo / glob
-- Más lenguajes
+- Stateful rules (cyclomatic complexity, unused variables, code duplication)
+- SARIF output for CI/editor integration
+- Multi-file / glob analysis
+- More languages

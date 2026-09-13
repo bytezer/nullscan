@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use rayon::prelude::*;
 use tree_sitter::{Node, Parser, Tree};
 
 /// ponytail: fixed threshold for v1; expose as a CLI flag if a real project needs to
@@ -35,14 +36,16 @@ struct FileTokens {
 }
 
 pub fn find_duplicates(files: &[(PathBuf, String)]) -> Vec<Duplicate> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-        .expect("failed to load TypeScript grammar");
-
+    // Parsing dominates the cost here, so it's done in parallel; a `Parser` isn't
+    // shareable across concurrent calls, so each closure invocation gets its own
+    // (cheap to construct, unlike the tree it produces).
     let file_tokens: Vec<FileTokens> = files
-        .iter()
+        .par_iter()
         .filter_map(|(path, source)| {
+            let mut parser = Parser::new();
+            parser
+                .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+                .expect("failed to load TypeScript grammar");
             let tree = parser.parse(source, None)?;
             Some(FileTokens {
                 path: path.clone(),

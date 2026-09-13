@@ -43,7 +43,106 @@ pub fn analyze(source: &str) -> Vec<Diagnostic> {
     diagnostics.extend(cognitive_complexity_rule(&tree, source));
     diagnostics.extend(no_duplicate_string_rule(&tree, source));
     diagnostics.extend(no_identical_conditions_rule(&tree, source));
+    diagnostics.extend(no_redundant_boolean_comparison_rule(&tree, source));
+    diagnostics.extend(query_rule(&tree, source, "no-redundant-boolean", "double negation ('!!') is redundant, use Boolean(...) or the value directly", r#"
+        (unary_expression operator: "!" argument: (unary_expression operator: "!")) @report
+    "#));
+    diagnostics.extend(prefer_immediate_return_rule(&tree, source));
+    diagnostics.extend(no_collapsible_if_rule(&tree, source));
     diagnostics
+}
+
+/// Flags `const x = expr; return x;` — the variable adds nothing over `return expr;`.
+///
+/// ponytail: only the single-declarator, immediately-adjacent-statement case is
+/// checked (no data-flow analysis for "declared, then only used in the return despite
+/// other statements in between"). That broader case needs real liveness analysis.
+fn prefer_immediate_return_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    walk_for_immediate_returns(tree.root_node(), source, &mut out);
+    out
+}
+
+fn walk_for_immediate_returns(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
+    if matches!(node.kind(), "statement_block" | "program") {
+        let mut cursor = node.walk();
+        let statements: Vec<Node> = node.named_children(&mut cursor).collect();
+        for pair in statements.windows(2) {
+            check_immediate_return(pair[0], pair[1], source, out);
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_immediate_returns(child, source, out);
+    }
+}
+
+fn check_immediate_return(decl: Node, ret: Node, source: &str, out: &mut Vec<Diagnostic>) {
+    if decl.kind() != "lexical_declaration" || ret.kind() != "return_statement" {
+        return;
+    }
+    if decl.named_child_count() != 1 {
+        return;
+    }
+    let declarator = decl.named_child(0).unwrap();
+    if declarator.kind() != "variable_declarator" || declarator.child_by_field_name("value").is_none() {
+        return;
+    }
+    let Some(name_node) = declarator.child_by_field_name("name") else { return };
+    if name_node.kind() != "identifier" {
+        return;
+    }
+    let Some(returned) = ret.named_child(0) else { return };
+    if returned.kind() != "identifier" {
+        return;
+    }
+    let name = name_node.utf8_text(source.as_bytes()).unwrap_or("");
+    let returned_name = returned.utf8_text(source.as_bytes()).unwrap_or("");
+    if name.is_empty() || name != returned_name {
+        return;
+    }
+    let start = decl.start_position();
+    out.push(Diagnostic {
+        rule: "prefer-immediate-return",
+        line: start.row + 1,
+        column: start.column + 1,
+        message: format!("'{name}' is declared only to be returned immediately; return the expression directly"),
+    });
+}
+
+/// Flags `if (a) { if (b) { ... } }` with no `else` on either `if` — it can be merged
+/// into `if (a && b) { ... }`.
+fn no_collapsible_if_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    walk_for_collapsible_if(tree.root_node(), source, &mut out);
+    out
+}
+
+fn walk_for_collapsible_if(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
+    if node.kind() == "if_statement" && node.child_by_field_name("alternative").is_none() {
+        if let Some(consequence) = node.child_by_field_name("consequence") {
+            let inner = match consequence.kind() {
+                "statement_block" if consequence.named_child_count() == 1 => consequence.named_child(0),
+                "if_statement" => Some(consequence),
+                _ => None,
+            };
+            if let Some(inner) = inner {
+                if inner.kind() == "if_statement" && inner.child_by_field_name("alternative").is_none() {
+                    let start = node.start_position();
+                    out.push(Diagnostic {
+                        rule: "no-collapsible-if",
+                        line: start.row + 1,
+                        column: start.column + 1,
+                        message: "nested 'if' with no 'else' can be merged with the outer condition using '&&'".to_string(),
+                    });
+                }
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_collapsible_if(child, source, out);
+    }
 }
 
 /// Flags string literals repeated 3+ times in the same file (mirrors SonarJS S1192);
@@ -208,6 +307,43 @@ fn no_explicit_any_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
             column: start.column + 1,
             message: "unexpected 'any' type".to_string(),
         });
+    }
+    out
+}
+
+/// ponytail: combining an `operator:` field constraint with another field constraint
+/// (e.g. `left:`) on the same `binary_expression` pattern silently matches nothing in
+/// this tree-sitter binding, even though the query compiles without error — confirmed
+/// in isolation, see FINDINGS.md. So this matches on `left`/`right` alone and checks the
+/// operator's text manually, same workaround as the other text-sensitive rules above.
+fn no_redundant_boolean_comparison_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for field in ["left", "right"] {
+        let query_src = format!("(binary_expression {field}: [(true) (false)]) @report");
+        let query = Query::new(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), &query_src)
+            .expect("invalid no-redundant-boolean query");
+        let report_idx = query.capture_index_for_name("report").unwrap();
+
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+        while let Some(m) = matches.next() {
+            let report = m.captures().iter().find(|c| c.index == report_idx).unwrap();
+            let node = report.node;
+            let operator = node
+                .child_by_field_name("operator")
+                .and_then(|op| op.utf8_text(source.as_bytes()).ok())
+                .unwrap_or("");
+            if !matches!(operator, "==" | "===" | "!=" | "!==") {
+                continue;
+            }
+            let start = node.start_position();
+            out.push(Diagnostic {
+                rule: "no-redundant-boolean",
+                line: start.row + 1,
+                column: start.column + 1,
+                message: "comparing to a boolean literal is redundant".to_string(),
+            });
+        }
     }
     out
 }
@@ -402,6 +538,59 @@ mod tests {
                 if (x === 1) { b(); }
             }
         ";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn flags_comparison_to_boolean_literal() {
+        assert_eq!(rules("if (a === true) {}"), vec!["no-redundant-boolean"]);
+        // `==` also triggers eqeqeq independently — both rules are legitimately correct here.
+        assert_eq!(rules("if (false == a) {}"), vec!["eqeqeq", "no-redundant-boolean"]);
+    }
+
+    #[test]
+    fn flags_double_negation() {
+        assert_eq!(rules("const x = !!a;"), vec!["no-redundant-boolean"]);
+    }
+
+    #[test]
+    fn allows_plain_boolean_expressions() {
+        assert!(rules("if (a) {} if (!a) {}").is_empty());
+    }
+
+    #[test]
+    fn flags_declare_then_immediately_return() {
+        let src = "function f() { const result = compute(); return result; }";
+        assert_eq!(rules(src), vec!["prefer-immediate-return"]);
+    }
+
+    #[test]
+    fn allows_return_of_a_different_identifier() {
+        let src = "function f() { const result = compute(); return other; }";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn allows_declaration_used_before_return() {
+        let src = "function f() { const result = compute(); log(result); return result; }";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn flags_collapsible_nested_if() {
+        let src = "function f(a: boolean, b: boolean) { if (a) { if (b) { g(); } } }";
+        assert_eq!(rules(src), vec!["no-collapsible-if"]);
+    }
+
+    #[test]
+    fn allows_nested_if_with_else() {
+        let src = "function f(a: boolean, b: boolean) { if (a) { if (b) { g(); } else { h(); } } }";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn allows_nested_if_when_outer_has_more_statements() {
+        let src = "function f(a: boolean, b: boolean) { if (a) { setup(); if (b) { g(); } } }";
         assert!(rules(src).is_empty());
     }
 }

@@ -10,11 +10,9 @@ use tree_sitter::{Node, Tree};
 
 use crate::Diagnostic;
 
-const THRESHOLD: u32 = 15;
-
-pub fn cognitive_complexity_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+pub fn cognitive_complexity_rule(tree: &Tree, source: &str, threshold: u32) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    find_functions(tree.root_node(), source, &mut out);
+    find_functions(tree.root_node(), source, threshold, &mut out);
     out
 }
 
@@ -38,11 +36,11 @@ fn function_label(node: Node, source: &str) -> String {
 }
 
 /// Walks the whole tree looking for function-like nodes, scoring each one independently.
-fn find_functions(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
+fn find_functions(node: Node, source: &str, threshold: u32, out: &mut Vec<Diagnostic>) {
     if is_function_like(node.kind()) {
         if let Some(body) = node.child_by_field_name("body") {
             let score = score(body, 0, source);
-            if score > THRESHOLD {
+            if score > threshold {
                 let start = node.start_position();
                 let label = function_label(node, source);
                 out.push(Diagnostic {
@@ -50,7 +48,7 @@ fn find_functions(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
                     line: start.row + 1,
                     column: start.column + 1,
                     message: format!(
-                        "{label} has a cognitive complexity of {score} (threshold {THRESHOLD})"
+                        "{label} has a cognitive complexity of {score} (threshold {threshold})"
                     ),
                 });
             }
@@ -58,7 +56,7 @@ fn find_functions(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        find_functions(child, source, out);
+        find_functions(child, source, threshold, out);
     }
 }
 
@@ -143,7 +141,7 @@ mod tests {
             .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
-        cognitive_complexity_rule(&tree, source)
+        cognitive_complexity_rule(&tree, source, 15)
             .iter()
             .map(|d| {
                 d.message

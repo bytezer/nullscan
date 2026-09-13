@@ -11,7 +11,7 @@ use serde::Serialize;
 /// Short, rule-agnostic descriptions for the SARIF rule catalog. Diagnostic messages
 /// carry the specific detail (a count, a name); this is the fixed "what is this rule"
 /// blurb every occurrence shares.
-const RULE_DESCRIPTIONS: &[(&str, &str)] = &[
+pub(crate) const RULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("no-console", "Unexpected console call"),
     ("no-debugger", "Unexpected 'debugger' statement"),
     ("no-var", "Use 'let' or 'const' instead of 'var'"),

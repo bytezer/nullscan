@@ -1,4 +1,5 @@
 mod cognitive_complexity;
+mod config;
 mod duplication;
 
 use std::collections::HashMap;
@@ -7,6 +8,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use cognitive_complexity::cognitive_complexity_rule;
 
+pub use config::Config;
 pub use duplication::{find_duplicates, Duplicate, DuplicateLocation};
 
 pub struct Diagnostic {
@@ -16,8 +18,8 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-/// Parses TypeScript source and runs all built-in rules against it.
-pub fn analyze(source: &str) -> Vec<Diagnostic> {
+/// Parses TypeScript source and runs every rule not disabled by `config` against it.
+pub fn analyze(source: &str, config: &Config) -> Vec<Diagnostic> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
@@ -25,30 +27,59 @@ pub fn analyze(source: &str) -> Vec<Diagnostic> {
     let tree = parser.parse(source, None).expect("parse failed");
 
     let mut diagnostics = Vec::new();
-    diagnostics.extend(no_console_rule(&tree, source));
-    diagnostics.extend(query_rule(&tree, source, "no-debugger", "unexpected 'debugger' statement", r#"
-        (debugger_statement) @report
-    "#));
-    diagnostics.extend(query_rule(&tree, source, "no-var", "unexpected 'var', use 'let' or 'const'", r#"
-        (variable_declaration "var") @report
-    "#));
-    diagnostics.extend(query_rule(&tree, source, "eqeqeq", "expected '===' and instead saw '=='", r#"
-        (binary_expression operator: "==") @report
-    "#));
-    diagnostics.extend(query_rule(&tree, source, "eqeqeq", "expected '!==' and instead saw '!='", r#"
-        (binary_expression operator: "!=") @report
-    "#));
-    diagnostics.extend(no_explicit_any_rule(&tree, source));
-    diagnostics.extend(no_empty_catch_rule(&tree, source));
-    diagnostics.extend(cognitive_complexity_rule(&tree, source));
-    diagnostics.extend(no_duplicate_string_rule(&tree, source));
-    diagnostics.extend(no_identical_conditions_rule(&tree, source));
-    diagnostics.extend(no_redundant_boolean_comparison_rule(&tree, source));
-    diagnostics.extend(query_rule(&tree, source, "no-redundant-boolean", "double negation ('!!') is redundant, use Boolean(...) or the value directly", r#"
-        (unary_expression operator: "!" argument: (unary_expression operator: "!")) @report
-    "#));
-    diagnostics.extend(prefer_immediate_return_rule(&tree, source));
-    diagnostics.extend(no_collapsible_if_rule(&tree, source));
+    if config.rule_enabled("no-console") {
+        diagnostics.extend(no_console_rule(&tree, source));
+    }
+    if config.rule_enabled("no-debugger") {
+        diagnostics.extend(query_rule(&tree, source, "no-debugger", "unexpected 'debugger' statement", r#"
+            (debugger_statement) @report
+        "#));
+    }
+    if config.rule_enabled("no-var") {
+        diagnostics.extend(query_rule(&tree, source, "no-var", "unexpected 'var', use 'let' or 'const'", r#"
+            (variable_declaration "var") @report
+        "#));
+    }
+    if config.rule_enabled("eqeqeq") {
+        diagnostics.extend(query_rule(&tree, source, "eqeqeq", "expected '===' and instead saw '=='", r#"
+            (binary_expression operator: "==") @report
+        "#));
+        diagnostics.extend(query_rule(&tree, source, "eqeqeq", "expected '!==' and instead saw '!='", r#"
+            (binary_expression operator: "!=") @report
+        "#));
+    }
+    if config.rule_enabled("no-explicit-any") {
+        diagnostics.extend(no_explicit_any_rule(&tree, source));
+    }
+    if config.rule_enabled("no-empty-catch") {
+        diagnostics.extend(no_empty_catch_rule(&tree, source));
+    }
+    if config.rule_enabled("cognitive-complexity") {
+        diagnostics.extend(cognitive_complexity_rule(&tree, source, config.cognitive_complexity_threshold));
+    }
+    if config.rule_enabled("no-duplicate-string") {
+        diagnostics.extend(no_duplicate_string_rule(
+            &tree,
+            source,
+            config.duplicate_string_threshold,
+            config.duplicate_string_min_length,
+        ));
+    }
+    if config.rule_enabled("no-identical-conditions") {
+        diagnostics.extend(no_identical_conditions_rule(&tree, source));
+    }
+    if config.rule_enabled("no-redundant-boolean") {
+        diagnostics.extend(no_redundant_boolean_comparison_rule(&tree, source));
+        diagnostics.extend(query_rule(&tree, source, "no-redundant-boolean", "double negation ('!!') is redundant, use Boolean(...) or the value directly", r#"
+            (unary_expression operator: "!" argument: (unary_expression operator: "!")) @report
+        "#));
+    }
+    if config.rule_enabled("prefer-immediate-return") {
+        diagnostics.extend(prefer_immediate_return_rule(&tree, source));
+    }
+    if config.rule_enabled("no-collapsible-if") {
+        diagnostics.extend(no_collapsible_if_rule(&tree, source));
+    }
     diagnostics
 }
 
@@ -148,10 +179,7 @@ fn walk_for_collapsible_if(node: Node, source: &str, out: &mut Vec<Diagnostic>) 
 /// Flags string literals repeated 3+ times in the same file (mirrors SonarJS S1192);
 /// short strings are exempt since they're usually incidental (e.g. `""`, `"id"`), not
 /// copy-pasted business text worth extracting into a constant.
-fn no_duplicate_string_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
-    const THRESHOLD: usize = 3;
-    const MIN_LEN: usize = 10;
-
+fn no_duplicate_string_rule(tree: &Tree, source: &str, threshold: usize, min_len: usize) -> Vec<Diagnostic> {
     let query = Query::new(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), "(string) @report")
         .expect("invalid no-duplicate-string query");
     let report_idx = query.capture_index_for_name("report").unwrap();
@@ -163,7 +191,7 @@ fn no_duplicate_string_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
         let capture = m.captures().iter().find(|c| c.index == report_idx).unwrap();
         let text = capture.node.utf8_text(source.as_bytes()).unwrap_or("");
         // Strip the surrounding quotes before measuring length.
-        if text.len().saturating_sub(2) >= MIN_LEN {
+        if text.len().saturating_sub(2) >= min_len {
             occurrences.push(capture.node);
         }
     }
@@ -179,12 +207,12 @@ fn no_duplicate_string_rule(tree: &Tree, source: &str) -> Vec<Diagnostic> {
     for node in &occurrences {
         let text = node.utf8_text(source.as_bytes()).unwrap_or("");
         let total = counts[text];
-        if total < THRESHOLD {
+        if total < threshold {
             continue;
         }
         let index = seen_so_far.entry(text).or_insert(0);
         *index += 1;
-        if *index >= THRESHOLD {
+        if *index >= threshold {
             let start = node.start_position();
             out.push(Diagnostic {
                 rule: "no-duplicate-string",
@@ -413,7 +441,7 @@ mod tests {
     use super::*;
 
     fn rules(source: &str) -> Vec<&'static str> {
-        analyze(source).iter().map(|d| d.rule).collect()
+        analyze(source, &Config::default()).iter().map(|d| d.rule).collect()
     }
 
     #[test]
@@ -592,5 +620,33 @@ mod tests {
     fn allows_nested_if_when_outer_has_more_statements() {
         let src = "function f(a: boolean, b: boolean) { if (a) { setup(); if (b) { g(); } } }";
         assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn config_can_disable_a_rule() {
+        let src = "console.log('hi');";
+        assert_eq!(rules(src), vec!["no-console"]);
+
+        let mut config = Config::default();
+        config.disabled_rules.insert("no-console".to_string());
+        assert!(analyze(src, &config).is_empty());
+    }
+
+    #[test]
+    fn config_can_raise_the_cognitive_complexity_threshold() {
+        let src = "
+            function f(a: boolean, b: boolean, c: boolean, d: boolean, e: boolean, g: boolean) {
+                if (a) { if (b) { if (c) { if (d) { if (e) { if (g) { return 1; } } } } } }
+            }
+        ";
+        // Each nesting level except the innermost is independently collapsible, hence 5
+        // no-collapsible-if hits; what this test actually cares about is the presence
+        // (then absence) of cognitive-complexity once the threshold is raised.
+        assert!(rules(src).contains(&"cognitive-complexity"));
+
+        let mut config = Config::default();
+        config.cognitive_complexity_threshold = 25;
+        let diagnostics = analyze(src, &config);
+        assert!(!diagnostics.iter().any(|d| d.rule == "cognitive-complexity"));
     }
 }

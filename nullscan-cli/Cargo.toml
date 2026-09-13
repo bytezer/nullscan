@@ -9,3 +9,4 @@ nullscan-core = { version = "0.1.0", path = "../nullscan-core" }
 rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "1.1.6"

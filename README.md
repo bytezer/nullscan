@@ -37,6 +37,27 @@ findings show up as inline PR annotations with no extra tooling:
 cargo run -p nullscan-cli -- src/ --format sarif > results.sarif
 ```
 
+## Configuration
+
+Drop a `nullscan.toml` next to where you run the CLI (or point at one with
+`--config path/to/file.toml`) to disable rules or override thresholds. Everything is
+optional; anything omitted keeps its built-in default:
+
+```toml
+[rules]
+disabled = ["no-console", "no-var"]
+
+[thresholds]
+cognitive-complexity = 20        # default: 15
+duplicate-code-min-tokens = 50   # default: 30
+duplicate-string-threshold = 3   # default: 3
+duplicate-string-min-length = 10 # default: 10
+```
+
+An unknown name in `disabled` prints a warning (likely a typo) but doesn't fail the
+run. Disabling `duplicate-code` skips that pass entirely rather than just hiding its
+output, since it's the most expensive rule to compute.
+
 ## Implemented rules
 
 | Rule | What it detects |
@@ -80,7 +101,7 @@ What's shipped, and what's next.
 - [x] Parallelized analysis (`rayon`)
 - [x] SARIF output for CI/editor integration
 - [ ] VS Code extension (surface diagnostics inline as you type)
-- [ ] Configurable rule thresholds (CLI flags / config file)
+- [x] Configurable rule thresholds and disabling (`nullscan.toml` / `--config`)
 - [ ] More languages beyond TypeScript
 
 **Rules**

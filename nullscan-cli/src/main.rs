@@ -1,3 +1,4 @@
+mod config;
 mod sarif;
 
 use std::fs;
@@ -24,6 +25,10 @@ struct Args {
 
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
+
+    /// Path to a nullscan.toml config file (default: ./nullscan.toml if present)
+    #[arg(long)]
+    config: Option<String>,
 }
 
 impl std::fmt::Display for Format {
@@ -38,6 +43,14 @@ impl std::fmt::Display for Format {
 fn main() -> ExitCode {
     let args = Args::parse();
 
+    let config = match config::load(args.config.as_deref()) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let mut files = Vec::new();
     for path in &args.paths {
         collect_ts_files(Path::new(path), &mut files);
@@ -51,7 +64,7 @@ fn main() -> ExitCode {
         .par_iter()
         .filter_map(|file| match fs::read_to_string(file) {
             Ok(source) => {
-                let diagnostics = nullscan_core::analyze(&source);
+                let diagnostics = nullscan_core::analyze(&source, &config);
                 Some((file.clone(), source, diagnostics))
             }
             Err(e) => {
@@ -75,7 +88,11 @@ fn main() -> ExitCode {
         sources.push((file, source));
     }
 
-    let duplicates = nullscan_core::find_duplicates(&sources);
+    let duplicates = if config.rule_enabled("duplicate-code") {
+        nullscan_core::find_duplicates(&sources, config.duplicate_code_min_tokens)
+    } else {
+        Vec::new()
+    };
     any_diagnostics |= !duplicates.is_empty();
 
     match args.format {

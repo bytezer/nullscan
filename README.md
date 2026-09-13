@@ -21,10 +21,13 @@ nullscan/
 
 ```sh
 cargo run -p nullscan-cli -- file.ts
+cargo run -p nullscan-cli -- src/*.ts          # your shell expands the glob
+cargo run -p nullscan-cli -- src/                # walked recursively for .ts/.tsx
 ```
 
+Directory arguments are walked recursively, skipping `node_modules` and dotdirs.
 Prints one diagnostic per line (`file:line:column: [rule] message`) and exits with
-code 1 if anything was found, 0 if the file is clean.
+code 1 if anything was found, 0 if every file is clean.
 
 ## Implemented rules
 
@@ -51,5 +54,4 @@ See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 
 - Stateful rules (unused variables, code duplication)
 - SARIF output for CI/editor integration
-- Multi-file / glob analysis
 - More languages

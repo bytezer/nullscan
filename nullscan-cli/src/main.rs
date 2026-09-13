@@ -1,9 +1,19 @@
+mod sarif;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use rayon::prelude::*;
+
+#[derive(Clone, ValueEnum)]
+enum Format {
+    /// Human-readable, one diagnostic per line.
+    Text,
+    /// SARIF 2.1.0 JSON, for GitHub Code Scanning / editor SARIF viewers.
+    Sarif,
+}
 
 #[derive(Parser)]
 #[command(name = "nullscan", about = "Fast, open-source static analysis for TypeScript")]
@@ -11,6 +21,18 @@ struct Args {
     /// TypeScript files or directories to analyze (globs are expanded by your shell)
     #[arg(required = true)]
     paths: Vec<String>,
+
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+}
+
+impl std::fmt::Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            Format::Text => "text",
+            Format::Sarif => "sarif",
+        })
+    }
 }
 
 fn main() -> ExitCode {
@@ -41,28 +63,40 @@ fn main() -> ExitCode {
 
     let mut any_diagnostics = false;
     let mut sources = Vec::with_capacity(results.len());
+    let mut per_file_diagnostics = Vec::with_capacity(results.len());
     for (file, source, diagnostics) in results {
-        for d in &diagnostics {
-            println!("{}:{}:{}: [{}] {}", file.display(), d.line, d.column, d.rule, d.message);
-        }
         any_diagnostics |= !diagnostics.is_empty();
+        if matches!(args.format, Format::Text) {
+            for d in &diagnostics {
+                println!("{}:{}:{}: [{}] {}", file.display(), d.line, d.column, d.rule, d.message);
+            }
+        }
+        per_file_diagnostics.push((file.clone(), diagnostics));
         sources.push((file, source));
     }
 
     let duplicates = nullscan_core::find_duplicates(&sources);
-    for dup in &duplicates {
-        println!(
-            "duplicate code ({} tokens): {}:{}-{} <-> {}:{}-{}",
-            dup.token_count,
-            dup.a.file.display(),
-            dup.a.start_line,
-            dup.a.end_line,
-            dup.b.file.display(),
-            dup.b.start_line,
-            dup.b.end_line,
-        );
-    }
     any_diagnostics |= !duplicates.is_empty();
+
+    match args.format {
+        Format::Text => {
+            for dup in &duplicates {
+                println!(
+                    "duplicate code ({} tokens): {}:{}-{} <-> {}:{}-{}",
+                    dup.token_count,
+                    dup.a.file.display(),
+                    dup.a.start_line,
+                    dup.a.end_line,
+                    dup.b.file.display(),
+                    dup.b.start_line,
+                    dup.b.end_line,
+                );
+            }
+        }
+        Format::Sarif => {
+            println!("{}", sarif::render(&per_file_diagnostics, &duplicates));
+        }
+    }
 
     if any_diagnostics {
         ExitCode::FAILURE

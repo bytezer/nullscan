@@ -29,6 +29,14 @@ Directory arguments are walked recursively, skipping `node_modules` and dotdirs.
 Prints one diagnostic per line (`file:line:column: [rule] message`) and exits with
 code 1 if anything was found, 0 if every file is clean.
 
+Add `--format sarif` for [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) JSON output
+instead — consumed natively by GitHub Code Scanning and editor SARIF viewers, so
+findings show up as inline PR annotations with no extra tooling:
+
+```sh
+cargo run -p nullscan-cli -- src/ --format sarif > results.sarif
+```
+
 ## Implemented rules
 
 | Rule | What it detects |
@@ -70,7 +78,8 @@ What's shipped, and what's next.
 - [x] CLI with per-file diagnostics and exit codes for CI
 - [x] Multi-file / directory input (glob via shell expansion)
 - [x] Parallelized analysis (`rayon`)
-- [ ] SARIF output for CI/editor integration
+- [x] SARIF output for CI/editor integration
+- [ ] VS Code extension (surface diagnostics inline as you type)
 - [ ] Configurable rule thresholds (CLI flags / config file)
 - [ ] More languages beyond TypeScript
 

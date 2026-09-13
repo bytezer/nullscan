@@ -1,4 +1,8 @@
+mod cognitive_complexity;
+
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
+
+use cognitive_complexity::cognitive_complexity_rule;
 
 pub struct Diagnostic {
     pub rule: &'static str,
@@ -31,6 +35,7 @@ pub fn analyze(source: &str) -> Vec<Diagnostic> {
     "#));
     diagnostics.extend(no_explicit_any_rule(&tree, source));
     diagnostics.extend(no_empty_catch_rule(&tree, source));
+    diagnostics.extend(cognitive_complexity_rule(&tree, source));
     diagnostics
 }
 

@@ -36,6 +36,7 @@ code 1 if anything was found, 0 if the file is clean.
 | `eqeqeq` | `==`/`!=` instead of `===`/`!==` |
 | `no-explicit-any` | Explicit `any` type |
 | `no-empty-catch` | Empty `catch` block |
+| `cognitive-complexity` | Function whose [cognitive complexity](https://www.sonarsource.com/docs/CognitiveComplexity.pdf) exceeds 15 |
 
 ## Development
 
@@ -48,7 +49,7 @@ See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 
 ## Roadmap
 
-- Stateful rules (cyclomatic complexity, unused variables, code duplication)
+- Stateful rules (unused variables, code duplication)
 - SARIF output for CI/editor integration
 - Multi-file / glob analysis
 - More languages

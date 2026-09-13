@@ -41,6 +41,8 @@ code 1 if anything was found, 0 if every file is clean.
 | `no-empty-catch` | Empty `catch` block |
 | `cognitive-complexity` | Function whose [cognitive complexity](https://www.sonarsource.com/docs/CognitiveComplexity.pdf) exceeds 15 |
 | *(cross-file)* `duplicate code` | Copy-pasted blocks of 30+ tokens, across or within files |
+| `no-duplicate-string` | Same string literal (10+ chars) repeated 3+ times in a file |
+| `no-identical-conditions` | `if`/`else if` whose condition repeats an earlier one in the same chain |
 
 ## Performance
 
@@ -56,8 +58,34 @@ cargo test --workspace
 See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 (tree-sitter, rule architecture, etc.).
 
-## Roadmap
+## Achievements
 
-- Stateful rules (unused variables)
-- SARIF output for CI/editor integration
-- More languages
+What's shipped, and what's next.
+
+**Core**
+- [x] TypeScript parsing via tree-sitter
+- [x] CLI with per-file diagnostics and exit codes for CI
+- [x] Multi-file / directory input (glob via shell expansion)
+- [x] Parallelized analysis (`rayon`)
+- [ ] SARIF output for CI/editor integration
+- [ ] Configurable rule thresholds (CLI flags / config file)
+- [ ] More languages beyond TypeScript
+
+**Rules**
+- [x] `no-console`
+- [x] `no-debugger`
+- [x] `no-var`
+- [x] `eqeqeq`
+- [x] `no-explicit-any`
+- [x] `no-empty-catch`
+- [x] `cognitive-complexity` (per function)
+- [x] cross-file `duplicate code` (token-window based)
+- [x] `no-duplicate-string` — same string literal repeated 3+ times
+- [x] `no-identical-conditions` — repeated `if`/`else if` condition
+- [ ] `no-redundant-boolean` — `x === true`, `!!x`
+- [ ] `prefer-immediate-return` — declare-then-return in one step
+- [ ] `no-collapsible-if` — nested `if`s with no `else`, mergeable with `&&`
+- [ ] `no-unused-vars` / `no-unused-imports`
+- [ ] `no-identical-functions` — whole duplicated functions
+- [ ] `max-params`
+- [ ] `cognitive-complexity` at class/file level

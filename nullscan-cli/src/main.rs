@@ -23,6 +23,7 @@ fn main() -> ExitCode {
     files.dedup();
 
     let mut any_diagnostics = false;
+    let mut sources = Vec::new();
     for file in &files {
         let source = match fs::read_to_string(file) {
             Ok(s) => s,
@@ -37,7 +38,23 @@ fn main() -> ExitCode {
             println!("{}:{}:{}: [{}] {}", file.display(), d.line, d.column, d.rule, d.message);
         }
         any_diagnostics |= !diagnostics.is_empty();
+        sources.push((file.clone(), source));
     }
+
+    let duplicates = nullscan_core::find_duplicates(&sources);
+    for dup in &duplicates {
+        println!(
+            "duplicate code ({} tokens): {}:{}-{} <-> {}:{}-{}",
+            dup.token_count,
+            dup.a.file.display(),
+            dup.a.start_line,
+            dup.a.end_line,
+            dup.b.file.display(),
+            dup.b.start_line,
+            dup.b.end_line,
+        );
+    }
+    any_diagnostics |= !duplicates.is_empty();
 
     if any_diagnostics {
         ExitCode::FAILURE

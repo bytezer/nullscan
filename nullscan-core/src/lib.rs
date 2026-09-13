@@ -1,8 +1,11 @@
 mod cognitive_complexity;
+mod duplication;
 
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use cognitive_complexity::cognitive_complexity_rule;
+
+pub use duplication::{find_duplicates, Duplicate, DuplicateLocation};
 
 pub struct Diagnostic {
     pub rule: &'static str,

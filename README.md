@@ -43,6 +43,9 @@ code 1 if anything was found, 0 if every file is clean.
 | *(cross-file)* `duplicate code` | Copy-pasted blocks of 30+ tokens, across or within files |
 | `no-duplicate-string` | Same string literal (10+ chars) repeated 3+ times in a file |
 | `no-identical-conditions` | `if`/`else if` whose condition repeats an earlier one in the same chain |
+| `no-redundant-boolean` | `x === true`/`x == false` comparisons, and `!!x` double negation |
+| `prefer-immediate-return` | `const x = expr; return x;` instead of `return expr;` |
+| `no-collapsible-if` | Nested `if` with no `else` on either level, mergeable with `&&` |
 
 ## Performance
 
@@ -82,9 +85,9 @@ What's shipped, and what's next.
 - [x] cross-file `duplicate code` (token-window based)
 - [x] `no-duplicate-string` — same string literal repeated 3+ times
 - [x] `no-identical-conditions` — repeated `if`/`else if` condition
-- [ ] `no-redundant-boolean` — `x === true`, `!!x`
-- [ ] `prefer-immediate-return` — declare-then-return in one step
-- [ ] `no-collapsible-if` — nested `if`s with no `else`, mergeable with `&&`
+- [x] `no-redundant-boolean` — `x === true`, `!!x`
+- [x] `prefer-immediate-return` — declare-then-return in one step
+- [x] `no-collapsible-if` — nested `if`s with no `else`, mergeable with `&&`
 - [ ] `no-unused-vars` / `no-unused-imports`
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`

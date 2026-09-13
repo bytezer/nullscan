@@ -22,3 +22,23 @@ in the query predicate.
 
 See `no_console_rule` and `no_explicit_any_rule` in `nullscan-core/src/lib.rs` for the
 pattern to follow.
+
+## tree-sitter: an `operator:` field constraint can't be combined with another field constraint
+
+Two variants of the same problem, both confirmed in isolation against `false == a`:
+
+- `(binary_expression operator: "==" left: (false))` — **fails to compile**
+  (`Query error ... Impossible pattern`).
+- `(binary_expression operator: ["==" "==="] left: [(true) (false)])` — **compiles fine
+  but matches nothing**, even though `operator: [...]` alone and `left: [...]` alone
+  each match correctly on their own.
+
+**How it showed up:** the first attempt at `no-redundant-boolean` (`x == true`,
+`x === false`, etc.) used the second form. It compiled, ran, and silently returned zero
+matches — no error to notice, just a rule that never fires.
+
+**Practical rule:** when a `binary_expression` (or any node whose `operator` field is a
+choice of several anonymous tokens) needs both an operator check and a check on
+`left`/`right`, don't put both in the query. Match on `left`/`right` alone and read the
+`operator` field's text manually in Rust afterward — same shape as the `#eq?` workaround
+above. See `no_redundant_boolean_comparison_rule` in `nullscan-core/src/lib.rs`.

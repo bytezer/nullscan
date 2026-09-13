@@ -63,8 +63,12 @@ fn main() -> ExitCode {
     }
 }
 
+/// Directories that never contain hand-written source: skipping them keeps duplication
+/// detection from comparing a file against its own compiled/generated output.
+const SKIPPED_DIRS: &[&str] = &["node_modules", "dist", "build", ".next", "out"];
+
 /// Resolves a CLI argument to `.ts`/`.tsx` files: passed through as-is if it's a file,
-/// walked recursively if it's a directory (skipping `node_modules` and dotdirs).
+/// walked recursively if it's a directory (skipping dotdirs and `SKIPPED_DIRS`).
 fn collect_ts_files(path: &Path, out: &mut Vec<PathBuf>) {
     if path.is_file() {
         out.push(path.to_path_buf());
@@ -83,7 +87,7 @@ fn collect_ts_files(path: &Path, out: &mut Vec<PathBuf>) {
         let entry_path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('.') || name == "node_modules" {
+        if name.starts_with('.') || SKIPPED_DIRS.contains(&name.as_ref()) {
             continue;
         }
         if entry_path.is_dir() {

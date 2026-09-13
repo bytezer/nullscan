@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
+use rayon::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "nullscan", about = "Fast, open-source static analysis for TypeScript")]
@@ -22,23 +23,30 @@ fn main() -> ExitCode {
     files.sort();
     files.dedup();
 
-    let mut any_diagnostics = false;
-    let mut sources = Vec::new();
-    for file in &files {
-        let source = match fs::read_to_string(file) {
-            Ok(s) => s,
+    // Read + analyze in parallel; `par_iter().map(...).collect()` preserves the input
+    // order, so output stays deterministic even though the work doesn't run in order.
+    let results: Vec<(PathBuf, String, Vec<nullscan_core::Diagnostic>)> = files
+        .par_iter()
+        .filter_map(|file| match fs::read_to_string(file) {
+            Ok(source) => {
+                let diagnostics = nullscan_core::analyze(&source);
+                Some((file.clone(), source, diagnostics))
+            }
             Err(e) => {
                 eprintln!("error: could not read {}: {e}", file.display());
-                continue;
+                None
             }
-        };
+        })
+        .collect();
 
-        let diagnostics = nullscan_core::analyze(&source);
+    let mut any_diagnostics = false;
+    let mut sources = Vec::with_capacity(results.len());
+    for (file, source, diagnostics) in results {
         for d in &diagnostics {
             println!("{}:{}:{}: [{}] {}", file.display(), d.line, d.column, d.rule, d.message);
         }
         any_diagnostics |= !diagnostics.is_empty();
-        sources.push((file.clone(), source));
+        sources.push((file, source));
     }
 
     let duplicates = nullscan_core::find_duplicates(&sources);

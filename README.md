@@ -42,6 +42,11 @@ code 1 if anything was found, 0 if every file is clean.
 | `cognitive-complexity` | Function whose [cognitive complexity](https://www.sonarsource.com/docs/CognitiveComplexity.pdf) exceeds 15 |
 | *(cross-file)* `duplicate code` | Copy-pasted blocks of 30+ tokens, across or within files |
 
+## Performance
+
+Per-file analysis and duplication tokenization both run in parallel via `rayon`.
+On a 2,161-file real-world monorepo (20 cores): 43s → 8s.
+
 ## Development
 
 ```sh

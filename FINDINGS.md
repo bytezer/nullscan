@@ -1,24 +1,24 @@
 # Findings
 
-Notas técnicas y gotchas descubiertos durante el desarrollo, para no repetir la
-investigación (o el error) la próxima vez.
+Technical notes and gotchas discovered during development, so we don't repeat the
+research (or the mistake) next time.
 
-## tree-sitter: los predicados `#eq?`/`#match?` no se evalúan solos
+## tree-sitter: `#eq?`/`#match?` predicates aren't evaluated for you
 
-`QueryCursor::matches` (crate `tree-sitter` 0.27, binding de Rust) **no** filtra las
-coincidencias usando predicados de texto como `(#eq? @cap "algo")`. La query devuelve
-todos los matches estructurales sin importar el predicado — hay que leer el texto del
-nodo capturado (`node.utf8_text(source.as_bytes())`) y filtrar a mano en Rust.
+`QueryCursor::matches` (crate `tree-sitter` 0.27, Rust binding) does **not** filter
+matches using text predicates like `(#eq? @cap "something")`. The query returns every
+structural match regardless of the predicate — you have to read the captured node's
+text (`node.utf8_text(source.as_bytes())`) and filter manually in Rust.
 
-**Cómo se manifestó:** la regla `no-explicit-any` usaba
-`(predefined_type) @report (#eq? @report "any")` y marcaba *todos* los tipos primitivos
-(`number`, `boolean`, `string`...), no solo `any`. Un test (`allows_concrete_types`) lo
-agarró de inmediato.
+**How it showed up:** the `no-explicit-any` rule used
+`(predefined_type) @report (#eq? @report "any")` and flagged *every* primitive type
+(`number`, `boolean`, `string`...), not just `any`. A test (`allows_concrete_types`)
+caught it immediately.
 
-**Regla práctica:** usar queries de tree-sitter solo para condiciones *estructurales*
-(forma del árbol, tokens literales como `"var"` o `"=="` dentro del patrón). Cualquier
-condición sobre el *contenido/texto* de un nodo capturado se filtra en Rust después de
-`cursor.matches(...)`, no en el predicado de la query.
+**Practical rule:** use tree-sitter queries only for *structural* conditions (tree
+shape, literal tokens like `"var"` or `"=="` inside the pattern). Any condition on a
+captured node's *content/text* gets filtered in Rust after `cursor.matches(...)`, not
+in the query predicate.
 
-Ver `no_console_rule` y `no_explicit_any_rule` en `nullscan-core/src/lib.rs` para el
-patrón a seguir.
+See `no_console_rule` and `no_explicit_any_rule` in `nullscan-core/src/lib.rs` for the
+pattern to follow.

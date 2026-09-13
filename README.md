@@ -40,6 +40,7 @@ code 1 if anything was found, 0 if every file is clean.
 | `no-explicit-any` | Explicit `any` type |
 | `no-empty-catch` | Empty `catch` block |
 | `cognitive-complexity` | Function whose [cognitive complexity](https://www.sonarsource.com/docs/CognitiveComplexity.pdf) exceeds 15 |
+| *(cross-file)* `duplicate code` | Copy-pasted blocks of 30+ tokens, across or within files |
 
 ## Development
 
@@ -52,6 +53,6 @@ See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 
 ## Roadmap
 
-- Stateful rules (unused variables, code duplication)
+- Stateful rules (unused variables)
 - SARIF output for CI/editor integration
 - More languages

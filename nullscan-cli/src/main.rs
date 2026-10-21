@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
+use nullscan_core::Language;
 use rayon::prelude::*;
 
 #[derive(Clone, ValueEnum)]
@@ -53,19 +54,19 @@ fn main() -> ExitCode {
 
     let mut files = Vec::new();
     for path in &args.paths {
-        collect_ts_files(Path::new(path), &mut files);
+        collect_files(Path::new(path), &mut files);
     }
     files.sort();
     files.dedup();
 
     // Read + analyze in parallel; `par_iter().map(...).collect()` preserves the input
     // order, so output stays deterministic even though the work doesn't run in order.
-    let results: Vec<(PathBuf, String, Vec<nullscan_core::Diagnostic>)> = files
+    let results: Vec<(PathBuf, Language, String, Vec<nullscan_core::Diagnostic>)> = files
         .par_iter()
-        .filter_map(|file| match fs::read_to_string(file) {
+        .filter_map(|(file, language)| match fs::read_to_string(file) {
             Ok(source) => {
-                let diagnostics = nullscan_core::analyze(&source, &config);
-                Some((file.clone(), source, diagnostics))
+                let diagnostics = nullscan_core::analyze(&source, *language, &config);
+                Some((file.clone(), *language, source, diagnostics))
             }
             Err(e) => {
                 eprintln!("error: could not read {}: {e}", file.display());
@@ -77,7 +78,7 @@ fn main() -> ExitCode {
     let mut any_diagnostics = false;
     let mut sources = Vec::with_capacity(results.len());
     let mut per_file_diagnostics = Vec::with_capacity(results.len());
-    for (file, source, diagnostics) in results {
+    for (file, language, source, diagnostics) in results {
         any_diagnostics |= !diagnostics.is_empty();
         if matches!(args.format, Format::Text) {
             for d in &diagnostics {
@@ -85,7 +86,7 @@ fn main() -> ExitCode {
             }
         }
         per_file_diagnostics.push((file.clone(), diagnostics));
-        sources.push((file, source));
+        sources.push((file, language, source));
     }
 
     let duplicates = if config.rule_enabled("duplicate-code") {
@@ -126,11 +127,15 @@ fn main() -> ExitCode {
 /// detection from comparing a file against its own compiled/generated output.
 const SKIPPED_DIRS: &[&str] = &["node_modules", "dist", "build", ".next", "out"];
 
-/// Resolves a CLI argument to `.ts`/`.tsx` files: passed through as-is if it's a file,
-/// walked recursively if it's a directory (skipping dotdirs and `SKIPPED_DIRS`).
-fn collect_ts_files(path: &Path, out: &mut Vec<PathBuf>) {
+/// Resolves a CLI argument to supported source files, each tagged with its language:
+/// a file is taken as-is (warning if its extension isn't supported), a directory is
+/// walked recursively (skipping dotdirs and `SKIPPED_DIRS`).
+fn collect_files(path: &Path, out: &mut Vec<(PathBuf, Language)>) {
     if path.is_file() {
-        out.push(path.to_path_buf());
+        match Language::from_path(path) {
+            Some(language) => out.push((path.to_path_buf(), language)),
+            None => eprintln!("warning: skipping {}: unsupported file type", path.display()),
+        }
         return;
     }
     if !path.is_dir() {
@@ -150,9 +155,9 @@ fn collect_ts_files(path: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         if entry_path.is_dir() {
-            collect_ts_files(&entry_path, out);
-        } else if matches!(entry_path.extension().and_then(|e| e.to_str()), Some("ts" | "tsx")) {
-            out.push(entry_path);
+            collect_files(&entry_path, out);
+        } else if let Some(language) = Language::from_path(&entry_path) {
+            out.push((entry_path, language));
         }
     }
 }

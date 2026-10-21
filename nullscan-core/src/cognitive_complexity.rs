@@ -133,14 +133,10 @@ fn score_if(node: Node, nesting: u32, chained: bool, source: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Parser;
+    use crate::Language;
 
     fn complexity_of(source: &str) -> Vec<u32> {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-            .unwrap();
-        let tree = parser.parse(source, None).unwrap();
+        let tree = Language::TypeScript.parse(source).unwrap();
         cognitive_complexity_rule(&tree, source, 15)
             .iter()
             .map(|d| {

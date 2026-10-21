@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use rayon::prelude::*;
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::{Node, Tree};
+
+use crate::Language;
 
 pub struct Duplicate {
     pub token_count: usize,
@@ -31,18 +33,13 @@ struct FileTokens {
     tokens: Vec<Token>,
 }
 
-pub fn find_duplicates(files: &[(PathBuf, String)], min_tokens: usize) -> Vec<Duplicate> {
-    // Parsing dominates the cost here, so it's done in parallel; a `Parser` isn't
-    // shareable across concurrent calls, so each closure invocation gets its own
-    // (cheap to construct, unlike the tree it produces).
+pub fn find_duplicates(files: &[(PathBuf, Language, String)], min_tokens: usize) -> Vec<Duplicate> {
+    // Parsing dominates the cost here, so it's done in parallel (each call builds its
+    // own `Parser`, which isn't shareable across concurrent calls).
     let file_tokens: Vec<FileTokens> = files
         .par_iter()
-        .filter_map(|(path, source)| {
-            let mut parser = Parser::new();
-            parser
-                .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-                .expect("failed to load TypeScript grammar");
-            let tree = parser.parse(source, None)?;
+        .filter_map(|(path, language, source)| {
+            let tree = language.parse(source)?;
             Some(FileTokens {
                 path: path.clone(),
                 tokens: tokenize(&tree, source),
@@ -170,10 +167,10 @@ fn collect_leaves(node: Node, source: &str, out: &mut Vec<Token>) {
 mod tests {
     use super::*;
 
-    fn files(pairs: &[(&str, &str)]) -> Vec<(PathBuf, String)> {
+    fn files(pairs: &[(&str, &str)]) -> Vec<(PathBuf, Language, String)> {
         pairs
             .iter()
-            .map(|(name, src)| (PathBuf::from(name), src.to_string()))
+            .map(|(name, src)| (PathBuf::from(name), Language::TypeScript, src.to_string()))
             .collect()
     }
 

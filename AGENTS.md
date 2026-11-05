@@ -5,7 +5,7 @@
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~1s, 51 tests)
+cargo test --workspace                       # full suite (~12s, 78 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
 cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
 cargo run -p nullscan-cli -- src/ --format sarif

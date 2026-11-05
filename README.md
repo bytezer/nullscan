@@ -52,6 +52,8 @@ cognitive-complexity = 20        # default: 15
 duplicate-code-min-tokens = 50   # default: 30
 duplicate-string-threshold = 3   # default: 3
 duplicate-string-min-length = 10 # default: 10
+max-switch-cases = 10            # default: 10
+no-small-switch-min-cases = 3    # default: 3
 ```
 
 An unknown name in `disabled` prints a warning (likely a typo) but doesn't fail the
@@ -79,6 +81,24 @@ project-scoped `duplicate-code`).
 | `no-redundant-boolean` | `x === true`/`x == false` comparisons, and `!!x` double negation |
 | `prefer-immediate-return` | `const x = expr; return x;` instead of `return expr;` |
 | `no-collapsible-if` | Nested `if` with no `else` on either level, mergeable with `&&` |
+| `no-identical-expressions` | Same expression on both sides of a binary operator |
+| `no-duplicated-branches` | Two branches of a conditional with the same implementation |
+| `no-all-duplicated-branches` | Every branch of a conditional with the same implementation |
+| `no-useless-catch` | `catch` that only rethrows the caught error |
+| `no-redundant-jump` | Bare `return;` at the end of a function, bare `continue;` at the end of a loop |
+| `prefer-single-boolean-return` | `if`/`else` returning only `true` and `false` |
+| `no-nested-switch` | `switch` nested inside another `switch` (without a function boundary) |
+| `no-nested-template-literals` | Template literal nested in another template literal |
+| `no-small-switch` | `switch` with fewer than 3 `case` clauses (configurable) |
+| `max-switch-cases` | `switch` with more than 10 `case` clauses (configurable) |
+| `no-same-line-conditional` | `if` starting on the same line as the previous statement |
+| `non-existent-operator` | `=+`, `=-`, or `=!` typos |
+| `no-self-assign` | Assignment of a value to itself |
+| `no-constant-condition` | Constant `if`/ternary condition |
+| `use-isnan` | Comparison with `NaN` instead of `Number.isNaN` |
+| `no-array-constructor` | Ambiguous `Array(...)` / `new Array(...)` calls |
+| `no-new-wrappers` | `new String(...)`, `new Number(...)`, `new Boolean(...)` |
+| `no-duplicate-imports` | Multiple imports from the same module |
 
 ## Performance
 
@@ -129,6 +149,24 @@ What's shipped, and what's next.
 - [x] `no-redundant-boolean` — `x === true`, `!!x`
 - [x] `prefer-immediate-return` — declare-then-return in one step
 - [x] `no-collapsible-if` — nested `if`s with no `else`, mergeable with `&&`
+- [x] `no-identical-expressions` — identical operands around a binary operator
+- [x] `no-duplicated-branches` — two branches with the same implementation
+- [x] `no-all-duplicated-branches` — all branches with the same implementation
+- [x] `no-useless-catch` — `catch` that only rethrows
+- [x] `no-redundant-jump` — redundant `return;` / `continue;`
+- [x] `prefer-single-boolean-return` — `if`/`else` returning `true`/`false`
+- [x] `no-nested-switch` — nested `switch` statements
+- [x] `no-nested-template-literals` — nested template literals
+- [x] `no-small-switch` — too few `case` clauses
+- [x] `max-switch-cases` — too many `case` clauses
+- [x] `no-same-line-conditional` — conditional on the previous statement's line
+- [x] `non-existent-operator` — `=+`, `=-`, `=!` typos
+- [x] `no-self-assign` — self-assignment
+- [x] `no-constant-condition` — constant `if`/ternary conditions
+- [x] `use-isnan` — `NaN` comparisons
+- [x] `no-array-constructor` — ambiguous `Array` constructors
+- [x] `no-new-wrappers` — primitive wrapper objects
+- [x] `no-duplicate-imports` — repeated imports from one module
 - [ ] `no-unused-vars` / `no-unused-imports`
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`

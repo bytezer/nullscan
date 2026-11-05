@@ -1,0 +1,21 @@
+export function choose(x: number): string {
+    switch (x) {
+        case 1:
+            return "one";
+        case 2:
+            return "two";
+        case 3:
+            switch (x) {
+                case 1:
+                    return "one";
+                case 2:
+                    return "two";
+                case 3:
+                    return "three";
+                default:
+                    return "many";
+            }
+        default:
+            return "many";
+    }
+}

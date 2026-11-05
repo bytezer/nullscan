@@ -28,6 +28,10 @@ struct FileThresholdsConfig {
     duplicate_string_threshold: Option<usize>,
     #[serde(rename = "duplicate-string-min-length")]
     duplicate_string_min_length: Option<usize>,
+    #[serde(rename = "max-switch-cases")]
+    max_switch_cases: Option<usize>,
+    #[serde(rename = "no-small-switch-min-cases")]
+    no_small_switch_min_cases: Option<usize>,
 }
 
 /// Resolves and loads the config: `explicit_path` if given, else `./nullscan.toml` if
@@ -79,7 +83,34 @@ pub fn load(explicit_path: Option<&str>) -> Result<nullscan_core::Config, String
         if let Some(v) = thresholds.duplicate_string_min_length {
             config.duplicate_string_min_length = v;
         }
+        if let Some(v) = thresholds.max_switch_cases {
+            config.max_switch_cases = v;
+        }
+        if let Some(v) = thresholds.no_small_switch_min_cases {
+            config.no_small_switch_min_cases = v;
+        }
     }
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_switch_case_thresholds() {
+        let file: FileConfig = toml::from_str(
+            r#"
+            [thresholds]
+            max-switch-cases = 25
+            no-small-switch-min-cases = 5
+            "#,
+        )
+        .expect("valid config");
+
+        let thresholds = file.thresholds.expect("thresholds table");
+        assert_eq!(thresholds.max_switch_cases, Some(25));
+        assert_eq!(thresholds.no_small_switch_min_cases, Some(5));
+    }
 }

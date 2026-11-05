@@ -1,0 +1,45 @@
+//! Flags multiple `import` declarations from the same module in one file.
+//!
+//! The first import is kept and every later import from the same source string is
+//! reported. `export ... from` declarations are ignored, as are dynamic `import()`
+//! expressions. Module comparison uses the exact source string, including quotes.
+
+use std::collections::HashSet;
+
+use tree_sitter::Node;
+
+use crate::Diagnostic;
+use crate::rule::FileContext;
+
+use super::{node_text, report_at};
+
+pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut out = Vec::new();
+    walk(ctx.tree.root_node(), ctx.source, &mut seen, &mut out);
+    out
+}
+
+fn walk<'a>(
+    node: Node<'a>,
+    source: &'a str,
+    seen: &mut HashSet<&'a str>,
+    out: &mut Vec<Diagnostic>,
+) {
+    if node.kind() == "import_statement" {
+        if let Some(module) = node.child_by_field_name("source") {
+            let module_text = node_text(module, source);
+            if !seen.insert(module_text) {
+                out.push(report_at(
+                    "no-duplicate-imports",
+                    node,
+                    format!("module {module_text} is imported more than once"),
+                ));
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk(child, source, seen, out);
+    }
+}

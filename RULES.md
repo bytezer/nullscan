@@ -23,7 +23,54 @@ equivalent exists, the cell says so rather than guessing an ID. Category values 
 | `no-redundant-boolean` | code smell | SonarJS S1125 `no-redundant-boolean` | Implemented (file-scoped) |
 | `prefer-immediate-return` | code smell | SonarJS S1488 `prefer-immediate-return` | Implemented (file-scoped) |
 | `no-collapsible-if` | code smell | SonarJS S1066 `no-collapsible-if` | Implemented (file-scoped) |
+| `no-identical-expressions` | bug | SonarJS S1764 `no-identical-expressions`; ESLint `no-self-compare` (subset) | Implemented (file-scoped) |
+| `no-duplicated-branches` | bug | SonarJS S1871 `no-duplicated-branches` | Implemented (file-scoped) |
+| `no-all-duplicated-branches` | bug | SonarJS S3923 `no-all-duplicated-branches` | Implemented (file-scoped) |
+| `no-useless-catch` | code smell | SonarJS S2737 `no-useless-catch`; ESLint `no-useless-catch` | Implemented (file-scoped) |
+| `no-redundant-jump` | code smell | SonarJS S3626 `no-redundant-jump`; ESLint `no-useless-return` (return only) | Implemented (file-scoped) |
+| `prefer-single-boolean-return` | code smell | SonarJS S1126 `prefer-single-boolean-return` | Implemented (file-scoped) |
+| `no-nested-switch` | code smell | SonarJS S1821 `no-nested-switch` | Implemented (file-scoped) |
+| `no-nested-template-literals` | code smell | SonarJS S4624 `no-nested-template-literals` | Implemented (file-scoped) |
+| `no-small-switch` | code smell | SonarJS S1301 `no-small-switch` | Implemented (file-scoped; `no-small-switch-min-cases`) |
+| `max-switch-cases` | code smell | SonarJS S1479 `max-switch-cases` | Implemented (file-scoped; `max-switch-cases`) |
+| `no-same-line-conditional` | code smell | SonarJS S3972 `no-same-line-conditional` | Implemented (file-scoped) |
+| `non-existent-operator` | bug | SonarJS S2757 `non-existent-operator` | Implemented (file-scoped) |
+| `no-self-assign` | bug | SonarJS S1656 `no-self-assign`; ESLint `no-self-assign` | Implemented (file-scoped) |
+| `no-constant-condition` | bug | ESLint `no-constant-condition`; no SonarJS equivalent | Implemented (file-scoped; `if` and ternary only) |
+| `use-isnan` | bug | SonarJS S2688 `use-isnan`; ESLint `use-isnan` | Implemented (file-scoped) |
+| `no-array-constructor` | code smell | SonarJS S1528 `array-constructor`; ESLint/typescript-eslint `no-array-constructor` | Implemented (file-scoped) |
+| `no-new-wrappers` | bug | SonarJS S1533 `no-primitive-wrappers`; ESLint `no-new-wrappers` | Implemented (file-scoped) |
+| `no-duplicate-imports` | code smell | SonarJS S3863 `no-duplicate-imports` (via eslint-plugin-import `no-duplicates`); ESLint `no-duplicate-imports` | Implemented (file-scoped) |
 | `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI) |
+
+### Conservative limits
+
+These rules are syntax-only by design (no scope analysis, CFG, or type information):
+
+- `no-identical-expressions` compares trimmed source text and excludes `+` and `*`, where
+  repeating an operand is often intentional.
+- `no-duplicated-branches` / `no-all-duplicated-branches` compare trimmed source text;
+  empty bodies are ignored, and semantically equal but differently formatted bodies are
+  treated as different. The all-identical shape is reported only by
+  `no-all-duplicated-branches`.
+- `no-useless-catch` only matches a body with exactly one `throw <caught-parameter>`.
+- `no-redundant-jump` only matches a bare `return;` directly at the end of a function body
+  and a bare `continue;` directly at the end of a loop body. `break` and valued returns
+  are never reported.
+- `prefer-single-boolean-return` only matches a direct `if`/`else` whose branches are
+  literal `return true;` / `return false;`.
+- `no-nested-switch` stops at a function boundary between the switches.
+- `no-nested-template-literals` reports each nested template once.
+- `no-same-line-conditional` only checks statement-list positions and never flags an
+  `else if`.
+- `non-existent-operator` is whitespace-sensitive by design (`=+` fires, `= +` does not).
+- `no-self-assign` uses trimmed source-text equality, not symbol resolution.
+- `no-constant-condition` checks `if` and ternary conditions only, so intentional
+  `while (true)` loops are not reported.
+- `use-isnan` recognizes the literal operand text `NaN` / `Number.NaN`, not aliases.
+- `no-array-constructor` / `no-new-wrappers` only match bare `Array`, `String`, `Number`,
+  and `Boolean` identifiers.
+- `no-duplicate-imports` compares exact module source strings and ignores `export ... from`.
 
 ## Adding a rule
 

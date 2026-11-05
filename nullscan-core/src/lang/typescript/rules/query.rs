@@ -1,7 +1,37 @@
-use tree_sitter::{Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use crate::Diagnostic;
 use crate::rule::FileContext;
+
+/// Source text for a node. Invalid UTF-8 only happens for malformed source, so an empty
+/// string is a safe fallback and keeps the text-sensitive rules from panicking.
+pub(crate) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
+    node.utf8_text(source.as_bytes()).unwrap_or("")
+}
+
+/// Named children with comments removed. tree-sitter exposes comments as named nodes, so
+/// child-count and "last statement" checks must filter them explicitly.
+pub(crate) fn named_children_without_comments<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| child.kind() != "comment")
+        .collect()
+}
+
+/// Builds a diagnostic at a node's 1-based start position.
+pub(crate) fn report_at(
+    rule: &'static str,
+    node: Node<'_>,
+    message: impl Into<String>,
+) -> Diagnostic {
+    let start = node.start_position();
+    Diagnostic {
+        rule,
+        line: start.row + 1,
+        column: start.column + 1,
+        message: message.into(),
+    }
+}
 
 /// Runs a tree-sitter query and reports one diagnostic per match at the `@report` capture.
 pub(crate) fn query_rule(

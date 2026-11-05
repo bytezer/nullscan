@@ -159,7 +159,9 @@ mod tests {
 
     #[test]
     fn allows_plain_boolean_expressions() {
-        assert!(rules("if (a) {} if (!a) {}").is_empty());
+        // Keep the two `if`s on separate lines: same-line conditionals are flagged by
+        // `no-same-line-conditional` independently of this test's intent.
+        assert!(rules("if (a) {}\nif (!a) {}").is_empty());
     }
 
     #[test]
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn allows_nested_if_when_outer_has_more_statements() {
-        let src = "function f(a: boolean, b: boolean) { if (a) { setup(); if (b) { g(); } } }";
+        let src = "function f(a: boolean, b: boolean) { if (a) { setup();\nif (b) { g(); } } }";
         assert!(rules(src).is_empty());
     }
 
@@ -224,5 +226,292 @@ mod tests {
         config.cognitive_complexity_threshold = 25;
         let diagnostics = analyze(src, &config);
         assert!(!diagnostics.iter().any(|d| d.rule == "cognitive-complexity"));
+    }
+
+    #[test]
+    fn flags_identical_binary_operands() {
+        assert_eq!(
+            rules("const same = a === a;"),
+            vec!["no-identical-expressions"]
+        );
+        assert_eq!(
+            rules("const overlap = a < a;"),
+            vec!["no-identical-expressions"]
+        );
+    }
+
+    #[test]
+    fn allows_identical_operands_for_plus_and_multiply() {
+        assert!(rules("const sum = x + x;\nconst square = x * x;").is_empty());
+    }
+
+    #[test]
+    fn flags_duplicated_non_final_branch() {
+        let src = "function f(x: number) { if (x === 1) { a(); } else if (x === 2) { b(); } else { a(); } }";
+        assert_eq!(rules(src), vec!["no-duplicated-branches"]);
+    }
+
+    #[test]
+    fn allows_distinct_branches() {
+        let src = "function f(x: number) { if (x === 1) { a(); } else if (x === 2) { b(); } else { c(); } }";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn flags_all_duplicated_branches_once() {
+        assert_eq!(
+            rules("function f(x: number) { if (x === 1) { same(); } else { same(); } }"),
+            vec!["no-all-duplicated-branches"]
+        );
+        assert_eq!(
+            rules("const value = x ? same() : same();"),
+            vec!["no-all-duplicated-branches"]
+        );
+    }
+
+    #[test]
+    fn flags_useless_catch() {
+        assert_eq!(
+            rules("try { f(); } catch (e) { throw e; }"),
+            vec!["no-useless-catch"]
+        );
+        assert_eq!(
+            rules("try { f(); } catch (e) { /* rethrow */ throw e; }"),
+            vec!["no-useless-catch"]
+        );
+    }
+
+    #[test]
+    fn allows_catch_that_does_more_than_rethrow() {
+        assert!(rules("try { f(); } catch (e) { log(e); throw e; }").is_empty());
+    }
+
+    #[test]
+    fn flags_redundant_return_and_continue() {
+        assert_eq!(
+            rules("function f() { return; }"),
+            vec!["no-redundant-jump"]
+        );
+        assert_eq!(
+            rules("function f() { for (;;) { continue; } }"),
+            vec!["no-redundant-jump"]
+        );
+        assert_eq!(
+            rules("function f() { return; /* done */ }"),
+            vec!["no-redundant-jump"]
+        );
+    }
+
+    #[test]
+    fn allows_valued_return_and_break() {
+        assert!(
+            rules("function f() { return 1; }\nfunction g() { for (;;) { break; } }").is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_boolean_return_wrapped_in_if_else() {
+        let src = "function f(flag: boolean): boolean { if (flag) { return true; } else { return false; } }";
+        assert_eq!(rules(src), vec!["prefer-single-boolean-return"]);
+    }
+
+    #[test]
+    fn allows_guard_style_boolean_returns() {
+        let src = "function f(flag: boolean): boolean { if (flag) { return true; }\nreturn false; }";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn flags_nested_switch_without_a_function_boundary() {
+        let src = "
+            function f(x: number) {
+                switch (x) {
+                    case 1: break;
+                    case 2: break;
+                    case 3:
+                        switch (x) {
+                            case 1: break;
+                            case 2: break;
+                            case 3: break;
+                            default: break;
+                        }
+                    default: break;
+                }
+            }
+        ";
+        assert_eq!(rules(src), vec!["no-nested-switch"]);
+    }
+
+    #[test]
+    fn allows_separate_switches() {
+        let src = "
+            function f(x: number) {
+                switch (x) { case 1: break; case 2: break; case 3: break; }
+                switch (x) { case 1: break; case 2: break; case 3: break; }
+            }
+        ";
+        assert!(rules(src).is_empty());
+    }
+
+    #[test]
+    fn flags_nested_template_literals() {
+        assert_eq!(
+            rules("const message = `outer ${`inner`}`;"),
+            vec!["no-nested-template-literals"]
+        );
+        assert!(rules("const message = `outer ${name}`;").is_empty());
+    }
+
+    #[test]
+    fn tsx_detects_nested_template_literals() {
+        let src = "export function Label({ name }: { name: string }) { const text = `outer ${`inner ${name}`}`; return <span>{text}</span>; }";
+        let diagnostics = crate::analyze(src, Language::Tsx, &Config::default());
+        let rules: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
+        assert_eq!(rules, vec!["no-nested-template-literals"]);
+    }
+
+    #[test]
+    fn flags_small_switch() {
+        let src = "function f(x: number) { switch (x) { case 1: break; case 2: break; } }";
+        assert_eq!(rules(src), vec!["no-small-switch"]);
+        let three = "function f(x: number) { switch (x) { case 1: break; case 2: break; case 3: break; } }";
+        assert!(rules(three).is_empty());
+    }
+
+    #[test]
+    fn flags_switch_with_too_many_cases() {
+        assert_eq!(rules(&switch_source(11)), vec!["max-switch-cases"]);
+        assert!(rules(&switch_source(10)).is_empty());
+    }
+
+    #[test]
+    fn config_controls_switch_case_thresholds() {
+        let defaults = Config::default();
+        assert_eq!(defaults.max_switch_cases, 10);
+        assert_eq!(defaults.no_small_switch_min_cases, 3);
+
+        let small = "function f(x: number) { switch (x) { case 1: break; case 2: break; } }";
+        assert_eq!(rules(small), vec!["no-small-switch"]);
+        let mut config = Config::default();
+        config.no_small_switch_min_cases = 2;
+        assert!(analyze(small, &config).is_empty());
+
+        let large = switch_source(11);
+        assert_eq!(rules(&large), vec!["max-switch-cases"]);
+        let mut config = Config::default();
+        config.max_switch_cases = 20;
+        assert!(analyze(&large, &config).is_empty());
+    }
+
+    #[test]
+    fn flags_same_line_conditional() {
+        assert_eq!(
+            rules("const x = 1; if (x) {}"),
+            vec!["no-same-line-conditional"]
+        );
+        assert!(rules("const x = 1;\nif (x) {}").is_empty());
+        assert!(rules("if (a) {}\nelse if (b) {}").is_empty());
+    }
+
+    #[test]
+    fn flags_non_existent_operators() {
+        assert_eq!(
+            rules("let a = 1;\na=+b;"),
+            vec!["non-existent-operator"]
+        );
+        assert_eq!(
+            rules("let a = 1;\na=-b;"),
+            vec!["non-existent-operator"]
+        );
+        assert_eq!(
+            rules("let a = 1;\na=!b;"),
+            vec!["non-existent-operator"]
+        );
+        assert!(rules("let a = 1;\na = +b;\na = -b;\na = !b;").is_empty());
+    }
+
+    #[test]
+    fn flags_self_assignment() {
+        assert_eq!(rules("x = x;"), vec!["no-self-assign"]);
+        assert!(rules("x = y;").is_empty());
+    }
+
+    #[test]
+    fn flags_constant_conditions() {
+        assert_eq!(rules("if (true) {}"), vec!["no-constant-condition"]);
+        assert_eq!(rules("if (1 + 2) {}"), vec!["no-constant-condition"]);
+        assert_eq!(
+            rules("const value = false ? 1 : 2;"),
+            vec!["no-constant-condition"]
+        );
+        assert_eq!(rules("if (!true) {}"), vec!["no-constant-condition"]);
+        assert!(rules("if (value) {}\nwhile (true) {}").is_empty());
+    }
+
+    #[test]
+    fn flags_nan_comparisons() {
+        assert_eq!(
+            rules("const bad = value === NaN;"),
+            vec!["use-isnan"]
+        );
+        assert_eq!(
+            rules("const bad = value != Number.NaN;"),
+            vec!["eqeqeq", "use-isnan"]
+        );
+        assert!(rules("const bad = value === other;").is_empty());
+    }
+
+    #[test]
+    fn flags_array_constructor_edge_cases() {
+        assert_eq!(
+            rules("const a = new Array();"),
+            vec!["no-array-constructor"]
+        );
+        assert_eq!(
+            rules("const b = Array(1, 2);"),
+            vec!["no-array-constructor"]
+        );
+        assert_eq!(
+            rules("const c = new Array(\"x\");"),
+            vec!["no-array-constructor"]
+        );
+        assert!(rules("const d = new Array(500);\nconst e = Array.from(items);").is_empty());
+    }
+
+    #[test]
+    fn flags_new_primitive_wrappers() {
+        assert_eq!(
+            rules("const s = new String(\"x\");"),
+            vec!["no-new-wrappers"]
+        );
+        assert_eq!(
+            rules("const n = new Number(1);"),
+            vec!["no-new-wrappers"]
+        );
+        assert_eq!(
+            rules("const b = new Boolean(false);"),
+            vec!["no-new-wrappers"]
+        );
+        assert!(
+            rules("const s = String(\"x\");\nconst n = Number(1);\nconst b = Boolean(false);")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_duplicate_imports() {
+        let duplicated = "import { a } from \"./a\";\nimport { b } from \"./a\";\nexport { a, b };";
+        assert_eq!(rules(duplicated), vec!["no-duplicate-imports"]);
+        let distinct = "import { a } from \"./a\";\nimport { b } from \"./b\";\nexport { a, b };";
+        assert!(rules(distinct).is_empty());
+    }
+
+    fn switch_source(cases: usize) -> String {
+        let mut source = String::from("function f(x: number): number { switch (x) {");
+        for case in 1..=cases {
+            source.push_str(&format!(" case {case}: return {case};"));
+        }
+        source.push_str(" default: return -1; } }");
+        source
     }
 }

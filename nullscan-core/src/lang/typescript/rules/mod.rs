@@ -4,19 +4,38 @@
 //! scope, and execution order live in `crate::rule::RULES`; adding a module here without
 //! registering it there has no effect.
 
+mod branches;
 mod query;
 
 pub mod cognitive_complexity;
 pub mod eqeqeq;
+pub mod max_switch_cases;
+pub mod no_all_duplicated_branches;
+pub mod no_array_constructor;
 pub mod no_collapsible_if;
 pub mod no_console;
+pub mod no_constant_condition;
 pub mod no_debugger;
+pub mod no_duplicate_imports;
 pub mod no_duplicate_string;
+pub mod no_duplicated_branches;
 pub mod no_empty_catch;
 pub mod no_explicit_any;
 pub mod no_identical_conditions;
+pub mod no_identical_expressions;
+pub mod no_nested_switch;
+pub mod no_nested_template_literals;
+pub mod no_new_wrappers;
 pub mod no_redundant_boolean;
+pub mod no_redundant_jump;
+pub mod no_same_line_conditional;
+pub mod no_self_assign;
+pub mod no_small_switch;
+pub mod no_useless_catch;
 pub mod no_var;
+pub mod non_existent_operator;
 pub mod prefer_immediate_return;
+pub mod prefer_single_boolean_return;
+pub mod use_isnan;
 
-pub(crate) use query::query_rule;
+pub(crate) use query::{named_children_without_comments, node_text, query_rule, report_at};

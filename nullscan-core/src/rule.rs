@@ -148,6 +148,150 @@ pub const RULES: &[Rule] = &[
         scope: RuleScope::File,
         run: Some(rules::no_collapsible_if::run),
     },
+    Rule {
+        meta: RuleMeta {
+            id: "no-identical-expressions",
+            description: "Identical expression used on both sides of a binary operator",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_identical_expressions::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-duplicated-branches",
+            description: "Two branches share the same implementation",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_duplicated_branches::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-all-duplicated-branches",
+            description: "All branches share the same implementation",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_all_duplicated_branches::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-useless-catch",
+            description: "Catch block only rethrows the caught error",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_useless_catch::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-redundant-jump",
+            description: "Redundant 'return' or 'continue' at the end of a block",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_redundant_jump::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "prefer-single-boolean-return",
+            description: "Boolean return wrapped in an 'if'/'else'",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::prefer_single_boolean_return::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-nested-switch",
+            description: "'switch' statement nested inside another 'switch'",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_nested_switch::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-nested-template-literals",
+            description: "Template literal nested inside another template literal",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_nested_template_literals::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-small-switch",
+            description: "'switch' has too few 'case' clauses",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_small_switch::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "max-switch-cases",
+            description: "'switch' has too many 'case' clauses",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::max_switch_cases::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-same-line-conditional",
+            description: "Conditional starts on the same line as the previous statement",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_same_line_conditional::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "non-existent-operator",
+            description: "Non-existent operator such as '=+' or '=-'",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::non_existent_operator::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-self-assign",
+            description: "Variable assigned to itself",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_self_assign::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-constant-condition",
+            description: "Constant condition in 'if' or ternary expression",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_constant_condition::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "use-isnan",
+            description: "Comparison with 'NaN' instead of Number.isNaN",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::use_isnan::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-array-constructor",
+            description: "Array constructed with the 'Array' constructor",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_array_constructor::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-new-wrappers",
+            description: "Primitive wrapper object created with 'new'",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_new_wrappers::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-duplicate-imports",
+            description: "Module imported more than once",
+        },
+        scope: RuleScope::File,
+        run: Some(rules::no_duplicate_imports::run),
+    },
     // Cross-file rule: orchestrated by the CLI because it needs every source at once,
     // but still registered here so SARIF and config validation have one catalog.
     Rule {
@@ -215,6 +359,24 @@ mod tests {
             "no-redundant-boolean",
             "prefer-immediate-return",
             "no-collapsible-if",
+            "no-identical-expressions",
+            "no-duplicated-branches",
+            "no-all-duplicated-branches",
+            "no-useless-catch",
+            "no-redundant-jump",
+            "prefer-single-boolean-return",
+            "no-nested-switch",
+            "no-nested-template-literals",
+            "no-small-switch",
+            "max-switch-cases",
+            "no-same-line-conditional",
+            "non-existent-operator",
+            "no-self-assign",
+            "no-constant-condition",
+            "use-isnan",
+            "no-array-constructor",
+            "no-new-wrappers",
+            "no-duplicate-imports",
             "duplicate-code",
         ] {
             assert!(ids.contains(id), "expected rule '{id}' to be registered");
@@ -254,6 +416,24 @@ mod tests {
                 "no-redundant-boolean",
                 "prefer-immediate-return",
                 "no-collapsible-if",
+                "no-identical-expressions",
+                "no-duplicated-branches",
+                "no-all-duplicated-branches",
+                "no-useless-catch",
+                "no-redundant-jump",
+                "prefer-single-boolean-return",
+                "no-nested-switch",
+                "no-nested-template-literals",
+                "no-small-switch",
+                "max-switch-cases",
+                "no-same-line-conditional",
+                "non-existent-operator",
+                "no-self-assign",
+                "no-constant-condition",
+                "use-isnan",
+                "no-array-constructor",
+                "no-new-wrappers",
+                "no-duplicate-imports",
             ]
         );
     }

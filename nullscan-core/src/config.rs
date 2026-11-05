@@ -9,6 +9,10 @@ pub struct Config {
     pub duplicate_code_min_tokens: usize,
     pub duplicate_string_threshold: usize,
     pub duplicate_string_min_length: usize,
+    /// Maximum number of non-default `case` clauses allowed before `max-switch-cases`.
+    pub max_switch_cases: usize,
+    /// Minimum number of non-default `case` clauses required before `no-small-switch`.
+    pub no_small_switch_min_cases: usize,
 }
 
 impl Default for Config {
@@ -19,6 +23,8 @@ impl Default for Config {
             duplicate_code_min_tokens: 30,
             duplicate_string_threshold: 3,
             duplicate_string_min_length: 10,
+            max_switch_cases: 10,
+            no_small_switch_min_cases: 3,
         }
     }
 }

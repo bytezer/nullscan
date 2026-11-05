@@ -907,6 +907,111 @@ mod tests {
         }
     }
 
+    #[test]
+    fn flags_eval_calls_and_ignores_references() {
+        let calls = "eval(code); window.eval(code); global.eval(code); globalThis.eval(code); self.eval(code); this.eval(code);";
+        assert_eq!(rules(calls), vec!["no-eval"; 6]);
+        // A reference, an unrelated object, and computed access are not direct calls.
+        assert!(
+            rules("const reference = eval;\nobj.eval(code);\nwindow[\"eval\"](code);").is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_implied_eval_for_string_arguments() {
+        let calls = "setTimeout('doWork()', 0); setInterval(`tick()`, 10); setImmediate(\"task()\"); execScript('legacy()'); window.setTimeout('a()', 0); global.setInterval('b()'); globalThis.setImmediate('c()');";
+        assert_eq!(rules(calls), vec!["no-implied-eval"; 7]);
+        assert!(
+            rules(
+                "setTimeout(run, 0);\nsetInterval(() => tick(), 10);\nsetImmediate(callback);\nexecScript(name);\nsetTimeout(`a${b}`, 0);\nobj.setTimeout('x', 0);"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_function_constructor_calls() {
+        let constructions = "new Function('a', 'b'); Function('x'); window.Function('x'); global.Function('x'); globalThis.Function('x');";
+        assert_eq!(rules(constructions), vec!["no-new-func"; 5]);
+        assert!(rules("const reference = Function;\nnew Date();\nobj.Function('x');").is_empty());
+    }
+
+    #[test]
+    fn flags_script_urls() {
+        let urls = "const a = 'javascript:alert(1)';\nconst b = \" JavaScript:void(0) \";\nconst c = `javascript:run()`;";
+        assert_eq!(rules(urls), vec!["no-script-url"; 3]);
+        // Comments and dynamic templates are not literal script URLs.
+        assert!(
+            rules(
+                "// javascript:alert(1)\n/* javascript:void(0) */\nconst ok = 'https://example.com';\nconst dynamic = `javascript:${target}`;"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn tsx_flags_script_urls() {
+        let source = "export function Link() { return <a href=\"javascript:void(0)\">bad</a>; }";
+        let diagnostics = crate::analyze(source, Language::Tsx, &Config::default());
+        let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
+        assert_eq!(rule_ids, vec!["no-script-url"]);
+    }
+
+    #[test]
+    fn flags_hardcoded_secrets() {
+        let source = r#"
+            const password = "hunter2supersecret";
+            const config = { apiKey: "abcdefghijkl", client_secret: `zyxwvutsrq` };
+            target.token = "qwertyuiopas";
+        "#;
+        assert_eq!(rules(source), vec!["hardcoded-secrets"; 4]);
+
+        let diagnostics = analyze("const apiKey = 'abcdefghijkl';", &Config::default());
+        assert_eq!(
+            diagnostics[0].message,
+            "possible hard-coded secret in 'apiKey'"
+        );
+    }
+
+    #[test]
+    fn allows_placeholder_or_dynamic_secrets() {
+        let source = r#"
+            const password = "changeme123";
+            const token = "test-token-value";
+            const secret = "short";
+            const apiKey = process.env.API_KEY;
+            const note = "hunter2supersecret";
+            const dynamic = `abc${value}defgh`;
+            const { credential } = settings;
+        "#;
+        assert!(rules(source).is_empty());
+    }
+
+    #[test]
+    fn config_can_disable_security_rules() {
+        let cases = [
+            ("no-eval", "eval(code);"),
+            ("no-implied-eval", "setTimeout('doWork()', 0);"),
+            ("no-new-func", "new Function('a');"),
+            ("no-script-url", "const url = 'javascript:alert(1)';"),
+            ("hardcoded-secrets", "const password = 'hunter2supersecret';"),
+        ];
+
+        for (rule, source) in cases {
+            assert!(
+                rules(source).contains(&rule),
+                "'{rule}' should fire before being disabled"
+            );
+            let mut config = Config::default();
+            config.disabled_rules.insert(rule.to_string());
+            let diagnostics = analyze(source, &config);
+            assert!(
+                !diagnostics.iter().any(|diagnostic| diagnostic.rule == rule),
+                "'{rule}' still fired after being disabled"
+            );
+        }
+    }
+
     fn switch_source(cases: usize) -> String {
         let mut source = String::from("function f(x: number): number { switch (x) {");
         for case in 1..=cases {

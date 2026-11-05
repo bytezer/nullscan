@@ -445,6 +445,51 @@ pub const RULES: &[Rule] = &[
         requires_scope: false,
         run: Some(rules::no_gratuitous_expressions::run),
     },
+    Rule {
+        meta: RuleMeta {
+            id: "no-eval",
+            description: "Direct call to 'eval' executes arbitrary code",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_eval::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-implied-eval",
+            description: "Timer or execScript called with a string evaluated as code",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_implied_eval::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-new-func",
+            description: "The 'Function' constructor compiles a string into code",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_new_func::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-script-url",
+            description: "String literal uses a 'javascript:' URL",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_script_url::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "hardcoded-secrets",
+            description: "Possible hard-coded secret in a string assignment",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::hardcoded_secrets::run),
+    },
     // Cross-file rule: orchestrated by the CLI because it needs every source at once,
     // but still registered here so SARIF and config validation have one catalog.
     Rule {
@@ -544,6 +589,11 @@ mod tests {
             "no-element-overwrite",
             "no-ignored-return",
             "no-gratuitous-expressions",
+            "no-eval",
+            "no-implied-eval",
+            "no-new-func",
+            "no-script-url",
+            "hardcoded-secrets",
             "duplicate-code",
         ] {
             assert!(ids.contains(id), "expected rule '{id}' to be registered");
@@ -614,6 +664,11 @@ mod tests {
                 "no-element-overwrite",
                 "no-ignored-return",
                 "no-gratuitous-expressions",
+                "no-eval",
+                "no-implied-eval",
+                "no-new-func",
+                "no-script-url",
+                "hardcoded-secrets",
             ]
         );
     }

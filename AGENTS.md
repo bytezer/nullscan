@@ -5,7 +5,7 @@
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~20s, 121 tests)
+cargo test --workspace                       # full suite (~20s, 129 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
 cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
 cargo run -p nullscan-cli -- src/ --format sarif
@@ -48,6 +48,7 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
   - Combining `operator:` with another field (`left:`/`right:`) silently matches nothing in this binding. Match the other field and read the operator text in Rust.
 - Scope-dependent rules read the owned `ScopeGraph` in `scope.rs`; never store tree-sitter `Node` values in it. Scope unit tests (function vs block scoping, shadowing, hoisting, parameters, imports, destructuring, read/write counts, globals, loops/switches) live in `scope.rs`; update them when resolution changes.
 - Reachability rules use `control_flow.rs` (and its unit tests) rather than building a CFG. `no-unused-collection` is the only Phase 4 rule that sets `requires_scope: true`; the other dataflow rules are syntax-only by design.
+- The Phase 5 security rules (`no-eval`, `no-implied-eval`, `no-new-func`, `no-script-url`, `hardcoded-secrets`) are syntax-only and deliberately avoid taint analysis, type information, and full dataflow. `hardcoded-secrets` is a name/value heuristic, not a secret scanner; see `RULES.md` for the full limitation list. The shared `static_string_text` helper in `rules/query.rs` recognizes `string` literals and substitution-free `template_string` nodes.
 - Unit tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering, `requires_scope`) live in `rule.rs`. Fixture-based regression tests live in `nullscan-core/tests/rules.rs`. Update the relevant layer when behavior changes.
 
 ## CLI/file-walking notes

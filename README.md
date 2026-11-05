@@ -112,6 +112,11 @@ project-scoped `duplicate-code`).
 | `no-element-overwrite` | Adjacent assignment overwrites the same target without a read |
 | `no-ignored-return` | Discarded return value of a known pure function |
 | `no-gratuitous-expressions` | `a && a`, `a || !a`, etc. in a condition |
+| `no-eval` | Direct `eval(...)` calls, including `window.eval` and friends |
+| `no-implied-eval` | `setTimeout`/`setInterval`/`setImmediate`/`execScript` called with a string |
+| `no-new-func` | `new Function(...)` and `Function(...)` |
+| `no-script-url` | String values starting with `javascript:` |
+| `hardcoded-secrets` | Secret-like names assigned a hard-coded string (heuristic) |
 
 ## Performance
 
@@ -194,6 +199,11 @@ What's shipped, and what's next.
 - [x] `no-element-overwrite` — adjacent assignments to the same target
 - [x] `no-ignored-return` — discarded pure return values
 - [x] `no-gratuitous-expressions` — constant `&&`/`||` conditions
+- [x] `no-eval` — direct `eval` calls
+- [x] `no-implied-eval` — timers called with a string
+- [x] `no-new-func` — `Function` constructor
+- [x] `no-script-url` — `javascript:` URLs
+- [x] `hardcoded-secrets` — heuristic hard-coded secret detection
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`
 - [ ] `cognitive-complexity` at class/file level

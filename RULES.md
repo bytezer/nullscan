@@ -7,7 +7,7 @@ category and the closest upstream catalog equivalent.
 Upstream identifiers below are SonarJS rule keys (the `S####` IDs used by
 `eslint-plugin-sonarjs` and SonarQube) and/or ESLint rule names. Where no reliable
 equivalent exists, the cell says so rather than guessing an ID. Category values are
-`bug`, `code smell`, `metric`, or `duplication`.
+`bug`, `code smell`, `metric`, `duplication`, or `security`.
 
 | nullscan ID | Category | Source / equivalent catalog rule | Implementation status |
 |---|---|---|---|
@@ -54,6 +54,11 @@ equivalent exists, the cell says so rather than guessing an ID. Category values 
 | `no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
 | `no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
 | `no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
+| `no-eval` | security | ESLint `no-eval`; no direct SonarJS equivalent | Implemented (file-scoped; direct calls and common global/member spellings only) |
+| `no-implied-eval` | security | ESLint `no-implied-eval`; no direct SonarJS equivalent | Implemented (file-scoped; string literals and substitution-free templates only) |
+| `no-new-func` | security | ESLint `no-new-func`; no direct SonarJS equivalent | Implemented (file-scoped; bare and common global/member forms) |
+| `no-script-url` | security | ESLint `no-script-url`; no direct SonarJS equivalent | Implemented (file-scoped; string and substitution-free template literals) |
+| `hardcoded-secrets` | security | SonarJS S6418 (hard-coded secrets); no ESLint core equivalent | Implemented (file-scoped; name/value heuristic, not a secret scanner) |
 | `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI) |
 
 ### Conservative limits
@@ -114,6 +119,28 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
   conditions, and only flags `&&`/`||` expressions whose operands are textually identical
   or where one is the `!` negation of the other. Broader constant-folding and always-true
   analysis is out of scope.
+- `no-eval` reports only direct calls to bare `eval` or `.eval` on `window`, `global`,
+  `globalThis`, `self`, or `this`. References that are not called (`const f = eval`),
+  aliases, computed access (`window["eval"]`), and other receiver objects are ignored.
+- `no-implied-eval` inspects only the first argument of bare or `window`/`global`/
+  `globalThis` calls to `setTimeout`, `setInterval`, `setImmediate`, and `execScript`,
+  and only when that argument is a string literal or a substitution-free template.
+  Identifiers, functions, dynamic templates, aliases, and other objects are skipped.
+- `no-new-func` reports `new Function(...)` and `Function(...)` (bare or on `window`/
+  `global`/`globalThis`). Aliases, constructor references that are not called, computed
+  access, and other objects are not resolved.
+- `no-script-url` only checks string literals and substitution-free templates, comparing
+  trimmed lowercased text against the `javascript:` prefix. Dynamic templates and comments
+  are never reported.
+- `hardcoded-secrets` is a heuristic, **not** a secret scanner. It matches a fixed list of
+  secret-like names after removing `_`/`-` and lowercasing, and only a directly assigned
+  string literal or substitution-free template of at least 8 trimmed characters. It
+  excludes a fixed placeholder prefix list (`changeme`, `change_me`, `password`, `secret`,
+  `token`, `example`, `test`, `dummy`, `placeholder`, `your_`, `xxx`, `***`) and values
+  containing `${`. Computed values, concatenation, destructuring, class fields, computed
+  property access (`obj["password"]`), aliases, and non-string expressions such as
+  `process.env.X` are ignored. Expect false positives for fixtures/documentation and false
+  negatives for secrets built at runtime or hidden behind other names.
 
 ### Scope-analysis limits
 

@@ -9,6 +9,37 @@ pub(crate) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     node.utf8_text(source.as_bytes()).unwrap_or("")
 }
 
+/// Inner text of a static string-like literal: a `string` literal or a `template_string`
+/// with no substitutions. Returns `None` for dynamic templates and every other node kind.
+/// The surrounding quote/backtick delimiters are stripped but escape sequences are left
+/// untouched, so callers see the raw source text rather than a decoded runtime value.
+pub(crate) fn static_string_text<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    let text = match node.kind() {
+        "string" => node_text(node, source),
+        "template_string" if !has_template_substitution(node) => node_text(node, source),
+        _ => return None,
+    };
+    Some(strip_delimiters(text))
+}
+
+fn has_template_substitution(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .any(|child| child.kind() == "template_substitution")
+}
+
+fn strip_delimiters(text: &str) -> &str {
+    let text = text
+        .strip_prefix('"')
+        .or_else(|| text.strip_prefix('\''))
+        .or_else(|| text.strip_prefix('`'))
+        .unwrap_or(text);
+    text.strip_suffix('"')
+        .or_else(|| text.strip_suffix('\''))
+        .or_else(|| text.strip_suffix('`'))
+        .unwrap_or(text)
+}
+
 /// Named children with comments removed. tree-sitter exposes comments as named nodes, so
 /// child-count and "last statement" checks must filter them explicitly.
 pub(crate) fn named_children_without_comments<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {

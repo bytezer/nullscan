@@ -46,6 +46,14 @@ equivalent exists, the cell says so rather than guessing an ID. Category values 
 | `no-use-before-define` | bug | SonarJS S3827 (variables should be defined before being used); ESLint/typescript-eslint `no-use-before-define` | Implemented (file-scoped; same-scope, scope analysis) |
 | `prefer-const` | code smell | SonarJS S3353 `prefer-const`; ESLint `prefer-const` | Implemented (file-scoped; scope analysis) |
 | `no-redeclare` | code smell | SonarJS S2814 `no-redeclare`; ESLint/typescript-eslint `no-redeclare` | Implemented (file-scoped; scope analysis) |
+| `no-unreachable` | bug | SonarJS S1763 `no-unreachable`; ESLint `no-unreachable` | Implemented (file-scoped; `return`/`throw`/`break`/`continue`, terminating blocks and `if`/`else`; no `try`/`switch`/loop analysis) |
+| `no-fallthrough` | bug | SonarJS S128 `no-fallthrough`; ESLint `no-fallthrough` | Implemented (file-scoped; non-final `case` only, empty cases allowed, comment opt-out) |
+| `consistent-return` | bug | SonarJS S3801 `no-inconsistent-returns`; ESLint `consistent-return` | Implemented (file-scoped; path-insensitive) |
+| `no-one-iteration-loop` | code smell | SonarJS S1751 `no-one-iteration-loop`; ESLint `no-unreachable-loop` | Implemented (file-scoped; top-level unconditional exits only) |
+| `no-unused-collection` | code smell | SonarJS S4030 `no-unused-collection`; no direct ESLint core equivalent | Implemented (file-scoped; scope analysis; local array/object/`Map`/`Set` only) |
+| `no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
+| `no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
+| `no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
 | `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI) |
 
 ### Conservative limits
@@ -76,6 +84,36 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
 - `no-array-constructor` / `no-new-wrappers` only match bare `Array`, `String`, `Number`,
   and `Boolean` identifiers.
 - `no-duplicate-imports` compares exact module source strings and ignores `export ... from`.
+- `no-unreachable` only recognises `return`, `throw`, `break`, `continue`, a block whose last
+  executing statement terminates, and an `if` whose two branches both terminate. `try`,
+  `switch`, and loops are never treated as terminating, so code after them is not reported.
+  A following hoisted function declaration is skipped, and the first real statement of a
+  contiguous dead region is reported once.
+- `no-fallthrough` checks only non-final, non-empty `case` bodies. A terminating last
+  statement (see `no-unreachable`) suppresses it, and a comment between the body and the
+  next label containing `fallthrough` or `falls through` marks the fallthrough as
+  intentional. `default` is not checked as a falling case, and the last case is never
+  reported.
+- `consistent-return` is path-insensitive: it reports a function with at least one valued
+  `return` plus either a bare `return;` or a body whose last executing statement does not
+  terminate. Returns in nested functions are ignored; loops and `switch` are not proven
+  terminating, so `while (true) { return x; }` can still be reported.
+- `no-one-iteration-loop` only sees top-level `break`/`return`/`throw` before any top-level
+  `continue` in the loop body. Exits inside `if`/`else`, blocks, nested loops, `switch`, or
+  functions are ignored.
+- `no-element-overwrite` compares only two adjacent `assignment_expression` statements in
+  the same statement list and uses trimmed target text. Intervening statements, aliases,
+  and control flow are not considered.
+- `no-ignored-return` uses a fixed allowlist of pure global functions and static methods
+  (`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `Number`, `String`, `Boolean`,
+  `encodeURI`/`decodeURI`/`encodeURIComponent`/`decodeURIComponent`, `Math.*`,
+  `JSON.parse`/`stringify`, selected `Object.*`, and `Array.isArray`/`from`/`of`). It never
+  infers purity for instance methods, and ignores `await`, `void`, and calls nested in
+  larger expressions.
+- `no-gratuitous-expressions` only inspects `if`, ternary, `while`, `do`/`while`, and `for`
+  conditions, and only flags `&&`/`||` expressions whose operands are textually identical
+  or where one is the `!` negation of the other. Broader constant-folding and always-true
+  analysis is out of scope.
 
 ### Scope-analysis limits
 
@@ -103,6 +141,12 @@ a control-flow graph, data-flow analysis, or type checker:
 - `no-redeclare` reports the second binding with the same name in one scope. Because
   tree-sitter is error-tolerant, syntax-invalid redeclarations that a TypeScript compiler
   would reject can still produce a diagnostic.
+- `no-unused-collection` reports a local `let`/`const`/`var` binding initialized to an array
+  literal, object literal, `new Map(...)`, or `new Set(...)` when every resolved reference
+  is a standalone mutation call (`push`, `set`, `add`, ...) or a direct index/property
+  assignment. Any other reference counts as a read and suppresses it. Module-level
+  bindings are skipped, and the rule is not type-aware, so an object whose own method is
+  named like a collection mutator is treated the same way.
 
 ## Adding a rule
 

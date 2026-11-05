@@ -373,6 +373,78 @@ pub const RULES: &[Rule] = &[
         requires_scope: true,
         run: Some(rules::no_redeclare::run),
     },
+    Rule {
+        meta: RuleMeta {
+            id: "no-unreachable",
+            description: "Statement is unreachable after a statement that transfers control",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_unreachable::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-fallthrough",
+            description: "Switch case falls through to the next case",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_fallthrough::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "consistent-return",
+            description: "Function returns a value on some paths but not on others",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::consistent_return::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-one-iteration-loop",
+            description: "Loop body always exits on its first iteration",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_one_iteration_loop::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-unused-collection",
+            description: "Collection is only mutated; its contents are never read",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_unused_collection::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-element-overwrite",
+            description: "Assignment overwrites an unread adjacent assignment to the same target",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_element_overwrite::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-ignored-return",
+            description: "Return value of a pure function call is ignored",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_ignored_return::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-gratuitous-expressions",
+            description: "Condition contains a self-contradicting or redundant expression",
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_gratuitous_expressions::run),
+    },
     // Cross-file rule: orchestrated by the CLI because it needs every source at once,
     // but still registered here so SARIF and config validation have one catalog.
     Rule {
@@ -464,6 +536,14 @@ mod tests {
             "no-use-before-define",
             "prefer-const",
             "no-redeclare",
+            "no-unreachable",
+            "no-fallthrough",
+            "consistent-return",
+            "no-one-iteration-loop",
+            "no-unused-collection",
+            "no-element-overwrite",
+            "no-ignored-return",
+            "no-gratuitous-expressions",
             "duplicate-code",
         ] {
             assert!(ids.contains(id), "expected rule '{id}' to be registered");
@@ -526,6 +606,14 @@ mod tests {
                 "no-use-before-define",
                 "prefer-const",
                 "no-redeclare",
+                "no-unreachable",
+                "no-fallthrough",
+                "consistent-return",
+                "no-one-iteration-loop",
+                "no-unused-collection",
+                "no-element-overwrite",
+                "no-ignored-return",
+                "no-gratuitous-expressions",
             ]
         );
     }
@@ -538,6 +626,7 @@ mod tests {
             "no-use-before-define",
             "prefer-const",
             "no-redeclare",
+            "no-unused-collection",
         ] {
             let rule = RULES
                 .iter()
@@ -554,6 +643,7 @@ mod tests {
                     | "no-use-before-define"
                     | "prefer-const"
                     | "no-redeclare"
+                    | "no-unused-collection"
             )
         }) {
             assert!(

@@ -104,6 +104,14 @@ project-scoped `duplicate-code`).
 | `no-use-before-define` | A `let`/`const`/`class` use before its same-scope declaration |
 | `prefer-const` | `let` declarator that is never reassigned |
 | `no-redeclare` | A second binding with the same name in one scope |
+| `no-unreachable` | Statement that can never execute after a terminating statement |
+| `no-fallthrough` | Non-empty `switch` case that can fall into the next case |
+| `consistent-return` | Function that returns a value on some paths but not others |
+| `no-one-iteration-loop` | Loop that unconditionally exits on its first iteration |
+| `no-unused-collection` | Local collection that is only mutated, never read |
+| `no-element-overwrite` | Adjacent assignment overwrites the same target without a read |
+| `no-ignored-return` | Discarded return value of a known pure function |
+| `no-gratuitous-expressions` | `a && a`, `a || !a`, etc. in a condition |
 
 ## Performance
 
@@ -178,6 +186,14 @@ What's shipped, and what's next.
 - [x] `no-use-before-define` — same-scope use before declaration
 - [x] `prefer-const` — `let` variables that are never reassigned
 - [x] `no-redeclare` — duplicate bindings in one scope
+- [x] `no-unreachable` — statements after a terminating jump
+- [x] `no-fallthrough` — `switch` cases that fall into the next case
+- [x] `consistent-return` — mixed valued and bare/falling-off returns
+- [x] `no-one-iteration-loop` — loops that exit on their first iteration
+- [x] `no-unused-collection` — collections that are only mutated
+- [x] `no-element-overwrite` — adjacent assignments to the same target
+- [x] `no-ignored-return` — discarded pure return values
+- [x] `no-gratuitous-expressions` — constant `&&`/`||` conditions
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`
 - [ ] `cognitive-complexity` at class/file level

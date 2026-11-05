@@ -308,8 +308,11 @@ mod tests {
 
     #[test]
     fn allows_valued_return_and_break() {
+        // The `break` is conditional on purpose: an unconditional one would be a
+        // legitimate `no-one-iteration-loop` hit and obscure this test's intent.
         assert!(
-            rules("function f() { return 1; }\nfunction g() { for (;;) { break; } }").is_empty()
+            rules("function f() { return 1; }\nfunction g(flag: boolean) { for (;;) { if (flag) { break; } } }")
+                .is_empty()
         );
     }
 
@@ -339,6 +342,7 @@ mod tests {
                             case 3: break;
                             default: break;
                         }
+                        break;
                     default: break;
                 }
             }
@@ -431,7 +435,11 @@ mod tests {
             rules("let a = 1;\na=!b;"),
             vec!["non-existent-operator"]
         );
-        assert!(rules("let a = 1;\na = +b;\na = -b;\na = !b;").is_empty());
+        // Separate the assignments so they are not adjacent statements targeting the
+        // same variable (`no-element-overwrite` would legitimately fire).
+        assert!(
+            rules("let a = 1;\na = +b;\nlog(a);\na = -b;\nlog(a);\na = !b;").is_empty()
+        );
     }
 
     #[test]
@@ -635,12 +643,278 @@ mod tests {
         }
     }
 
+    #[test]
+    fn flags_unreachable_statements_once_per_region() {
+        assert_eq!(
+            rules("function f() { return 1; return 2; }"),
+            vec!["no-unreachable"]
+        );
+        // A hoisted declaration after the jump neither splits nor hides the region.
+        assert_eq!(
+            rules("function f() { return 1; function g() {} return 2; }"),
+            vec!["no-unreachable"]
+        );
+        // Only the first statement of the dead region is reported.
+        assert_eq!(
+            rules("function f() { return 1; a(); b(); return 2; }"),
+            vec!["no-unreachable"]
+        );
+        // A region that ends in a non-terminating statement can also make
+        // `consistent-return` fire; that is a separate, legitimate diagnostic.
+        assert_eq!(
+            rules("function f() { return 1; a(); b(); }"),
+            vec!["no-unreachable", "consistent-return"]
+        );
+    }
+
+    #[test]
+    fn allows_reachable_statements_after_conditionals() {
+        assert!(
+            rules(
+                "function f(flag: boolean) { if (flag) { return 1; } else { throw new Error(); } }"
+            )
+            .is_empty()
+        );
+        assert!(
+            !rules("function f(flag: boolean) { if (flag) { return 1; }\nuse(flag); }")
+                .contains(&"no-unreachable")
+        );
+    }
+
+    #[test]
+    fn flags_switch_fallthrough() {
+        let falling = "function f(x: number): number { switch (x) { case 1: a(); case 2: return 2; case 3: return 3; default: return 4; } return 0; }";
+        assert_eq!(rules(falling), vec!["no-fallthrough"]);
+
+        let grouped = "function f(x: number): number { switch (x) { case 1: case 2: return 2; case 3: return 3; default: return 4; } return 0; }";
+        assert!(rules(grouped).is_empty());
+    }
+
+    #[test]
+    fn fallthrough_comment_suppresses_the_diagnostic() {
+        let commented = "function f(x: number): number { switch (x) { case 1: a(); // falls through\ncase 2: return 2; case 3: return 3; default: return 4; } return 0; }";
+        assert!(rules(commented).is_empty());
+
+        let uppercase = "function f(x: number): number { switch (x) { case 1: a(); /* FALLTHROUGH */ case 2: return 2; case 3: return 3; default: return 4; } return 0; }";
+        assert!(rules(uppercase).is_empty());
+    }
+
+    #[test]
+    fn flags_inconsistent_returns() {
+        assert_eq!(
+            rules("function f(flag: boolean) { if (flag) { return 1; } }"),
+            vec!["consistent-return"]
+        );
+        assert_eq!(
+            rules(
+                "function f(flag: boolean) { if (flag) { return 1; }\nif (!flag) { return; }\nreturn 2; }"
+            ),
+            vec!["consistent-return"]
+        );
+        assert!(
+            rules("function f(flag: boolean) { if (flag) { return 1; } return 2; }").is_empty()
+        );
+        assert!(rules("function f() { throw new Error(); }").is_empty());
+    }
+
+    #[test]
+    fn consistent_return_ignores_returns_in_nested_functions() {
+        assert!(
+            rules("function outer() { const inner = () => { return 1; }; use(inner); }").is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_loops_that_exit_on_the_first_iteration() {
+        assert_eq!(
+            rules(
+                "function f(items: number[]) { for (const item of items) { return item; } return 0; }"
+            ),
+            vec!["no-one-iteration-loop"]
+        );
+        assert_eq!(
+            rules("function g() { while (ready) { throw new Error(); } }"),
+            vec!["no-one-iteration-loop"]
+        );
+    }
+
+    #[test]
+    fn allows_conditional_or_continued_loops() {
+        assert!(
+            rules("function f(items: number[]) { for (const item of items) { if (item) { break; } } }")
+                .is_empty()
+        );
+        assert!(
+            !rules("function f() { for (;;) { continue; } }").contains(&"no-one-iteration-loop")
+        );
+    }
+
+    #[test]
+    fn flags_collections_that_are_only_mutated() {
+        assert_eq!(
+            rules("function f() { const values: number[] = []; values.push(1); values[0] = 2; }"),
+            vec!["no-unused-collection"]
+        );
+        assert_eq!(
+            rules("function f() { const cache = new Map(); cache.set(\"a\", 1); }"),
+            vec!["no-unused-collection"]
+        );
+        assert_eq!(
+            rules("function f() { const seen = new Set(); seen.add(1); }"),
+            vec!["no-unused-collection"]
+        );
+    }
+
+    #[test]
+    fn allows_collections_whose_contents_are_read() {
+        assert!(rules("function f() { const values = [1, 2]; return values.length; }").is_empty());
+        assert!(
+            rules("function f() { const values: number[] = []; values.push(1); return values; }")
+                .is_empty()
+        );
+        assert!(
+            rules("function f(options: {}) { const record = {}; record.key = 1; use(record.key); }")
+                .is_empty()
+        );
+        // Module-level collections are external/exported by default.
+        assert!(rules("const cache = new Map(); cache.set(1, 2);").is_empty());
+    }
+
+    #[test]
+    fn flags_adjacent_overwrites() {
+        assert_eq!(
+            rules("function f(values: number[]) { values[0] = 1; values[0] = 2; }"),
+            vec!["no-element-overwrite"]
+        );
+        assert_eq!(
+            rules("function f(target: { x: number }, other: { x: number }) { target.x = 1; target.x = 2; other.x = 1; }"),
+            vec!["no-element-overwrite"]
+        );
+    }
+
+    #[test]
+    fn allows_non_adjacent_or_distinct_assignments() {
+        assert!(
+            rules("function f(values: number[]) { values[0] = 1; use(values[0]); values[0] = 2; }")
+                .is_empty()
+        );
+        assert!(
+            rules(
+                "function f(values: number[], other: number[]) { values[0] = 1; other[0] = 2; }"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_ignored_pure_returns() {
+        assert_eq!(rules("parseInt(\"1\", 10);"), vec!["no-ignored-return"]);
+        assert_eq!(rules("Math.max(1, 2);"), vec!["no-ignored-return"]);
+        assert_eq!(rules("JSON.parse(\"{}\");"), vec!["no-ignored-return"]);
+        assert_eq!(
+            rules("Object.keys({ a: 1 });"),
+            vec!["no-ignored-return"]
+        );
+    }
+
+    #[test]
+    fn allows_used_or_intentionally_discarded_returns() {
+        assert!(rules("const parsed = parseInt(\"1\", 10);\nuse(parsed);").is_empty());
+        assert!(rules("void parseInt(\"1\", 10);").is_empty());
+        assert!(rules("logger.parse(\"1\");").is_empty());
+        assert!(rules("async function f() { await parseInt(\"1\", 10); }").is_empty());
+    }
+
+    #[test]
+    fn flags_gratuitous_conditions() {
+        // `no-identical-expressions` also legitimately fires on `a && a`.
+        assert_eq!(
+            rules("if (a && a) {}"),
+            vec!["no-identical-expressions", "no-gratuitous-expressions"]
+        );
+        assert_eq!(
+            rules("if (a || !a) {}"),
+            vec!["no-gratuitous-expressions"]
+        );
+        assert_eq!(
+            rules("while (a && !a) { tick(); }"),
+            vec!["no-gratuitous-expressions"]
+        );
+        assert_eq!(
+            rules("const value = (a && a) ? b : c;"),
+            vec!["no-identical-expressions", "no-gratuitous-expressions"]
+        );
+    }
+
+    #[test]
+    fn allows_normal_conditions_and_non_conditions() {
+        assert!(rules("if (a && b) {}\nif (a && !b) {}").is_empty());
+        // Outside a condition the rule stays silent (only no-identical-expressions fires).
+        assert_eq!(
+            rules("const value = a && a;"),
+            vec!["no-identical-expressions"]
+        );
+    }
+
+    #[test]
+    fn tsx_flags_unreachable_code_after_return() {
+        let source = "export function View({ label }: { label: string }) { return <span>{label}</span>; return <b>{label}</b>; }";
+        let diagnostics = crate::analyze(source, Language::Tsx, &Config::default());
+        let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
+        assert_eq!(rule_ids, vec!["no-unreachable"]);
+    }
+
+    #[test]
+    fn config_can_disable_reachability_rules() {
+        let cases = [
+            ("no-unreachable", "function f() { return 1; return 2; }"),
+            (
+                "no-fallthrough",
+                "function f(x: number): number { switch (x) { case 1: a(); case 2: return 2; case 3: return 3; default: return 4; } return 0; }",
+            ),
+            (
+                "consistent-return",
+                "function f(flag: boolean) { if (flag) { return 1; } }",
+            ),
+            (
+                "no-one-iteration-loop",
+                "function f(items: number[]) { for (const item of items) { return item; } return 0; }",
+            ),
+            (
+                "no-unused-collection",
+                "function f() { const values: number[] = []; values.push(1); }",
+            ),
+            (
+                "no-element-overwrite",
+                "function f(values: number[]) { values[0] = 1; values[0] = 2; }",
+            ),
+            ("no-ignored-return", "parseInt(\"1\", 10);"),
+            ("no-gratuitous-expressions", "if (a && a) {}"),
+        ];
+
+        for (rule, source) in cases {
+            assert!(
+                rules(source).contains(&rule),
+                "'{rule}' should fire before being disabled"
+            );
+            let mut config = Config::default();
+            config.disabled_rules.insert(rule.to_string());
+            let diagnostics = analyze(source, &config);
+            assert!(
+                !diagnostics.iter().any(|diagnostic| diagnostic.rule == rule),
+                "'{rule}' still fired after being disabled"
+            );
+        }
+    }
+
     fn switch_source(cases: usize) -> String {
         let mut source = String::from("function f(x: number): number { switch (x) {");
         for case in 1..=cases {
             source.push_str(&format!(" case {case}: return {case};"));
         }
-        source.push_str(" default: return -1; } }");
+        // The trailing return keeps `consistent-return` quiet: the rule deliberately
+        // does not treat a `switch` as terminating.
+        source.push_str(" default: return -1; } return 0; }");
         source
     }
 }

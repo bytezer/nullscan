@@ -1,5 +1,6 @@
 mod cognitive_complexity;
 mod config;
+mod control_flow;
 mod duplication;
 mod lang {
     pub mod typescript;

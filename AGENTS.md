@@ -5,7 +5,7 @@
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~15s, 98 tests)
+cargo test --workspace                       # full suite (~20s, 121 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
 cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
 cargo run -p nullscan-cli -- src/ --format sarif
@@ -21,6 +21,7 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - `RULES.md` — human-facing catalog, one row per registry rule: category, closest SonarJS/ESLint equivalent, and implementation status. Update it when adding a rule.
 - `nullscan-core/tests/rules.rs` + `nullscan-core/tests/fixtures/<rule-id>/` — fixture-based regression harness. It discovers fixture directories dynamically and checks `valid.ts|tsx` (zero diagnostics for that rule) and `invalid.ts|tsx` (at least one). Other rules may fire on a fixture; only the rule named by the directory is asserted. Project-scoped rules are skipped.
 - `nullscan-core/src/scope.rs` — owned per-file lexical scope graph (`ScopeGraph`): module/function/block/catch/class/loop/switch scopes, binding kinds, and references with read/write counts. No tree-sitter `Node` values are stored. Built lazily by `analyze` only when an enabled file rule has `requires_scope: true`.
+- `nullscan-core/src/control_flow.rs` — small reusable statement helpers, deliberately not a CFG: `statement_terminates`, `last_statement`/`last_executable_statement`, `statements`, `body_statements`, `is_function_like`, `is_loop`, and `collect_returns` (skipping nested functions). The reachability/dataflow rules share these instead of duplicating tree walks; termination coverage is limited to return/throw/break/continue, terminating blocks, and `if`/`else`. Unit tests for the helpers live in the module.
 - `nullscan-core/src/lang/typescript/rules/` — one module per per-file rule; each exposes `pub fn run(&FileContext) -> Vec<Diagnostic>`. Shared query helper in `query.rs`. Scope-dependent rules read `ctx.scopes` and return early when it is `None`.
 - `nullscan-core/src/cognitive_complexity.rs` and `duplication.rs` — metric and clone-detection implementations, kept at the crate root; the TypeScript rule module only wraps them.
 - `nullscan-cli/` — clap argument parsing, `nullscan.toml` loading/deserialization, file walking, output formatting (text/SARIF), exit codes.
@@ -46,6 +47,7 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
   - `QueryCursor::matches` does not evaluate `#eq?`/`#match?`; filter `node.utf8_text(...)` in Rust.
   - Combining `operator:` with another field (`left:`/`right:`) silently matches nothing in this binding. Match the other field and read the operator text in Rust.
 - Scope-dependent rules read the owned `ScopeGraph` in `scope.rs`; never store tree-sitter `Node` values in it. Scope unit tests (function vs block scoping, shadowing, hoisting, parameters, imports, destructuring, read/write counts, globals, loops/switches) live in `scope.rs`; update them when resolution changes.
+- Reachability rules use `control_flow.rs` (and its unit tests) rather than building a CFG. `no-unused-collection` is the only Phase 4 rule that sets `requires_scope: true`; the other dataflow rules are syntax-only by design.
 - Unit tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering, `requires_scope`) live in `rule.rs`. Fixture-based regression tests live in `nullscan-core/tests/rules.rs`. Update the relevant layer when behavior changes.
 
 ## CLI/file-walking notes

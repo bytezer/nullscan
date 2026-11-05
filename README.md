@@ -60,6 +60,10 @@ output, since it's the most expensive rule to compute.
 
 ## Implemented rules
 
+See [RULES.md](./RULES.md) for the canonical catalog: categories, closest SonarJS/ESLint
+equivalents, and implementation status for every registry entry (including the
+project-scoped `duplicate-code`).
+
 | Rule | What it detects |
 |---|---|
 | `no-console` | Calls to `console.*` |
@@ -86,6 +90,13 @@ On a 2,161-file real-world monorepo (20 cores): 43s → 8s.
 ```sh
 cargo test --workspace
 ```
+
+Rule behavior is covered twice: unit tests in `nullscan-core/src/lang/typescript.rs`
+assert exact diagnostics, and the fixture harness in `nullscan-core/tests/rules.rs`
+discovers `nullscan-core/tests/fixtures/<rule-id>/{valid,invalid}.ts|tsx`. Every
+file-scoped rule needs at least one `valid` fixture (zero diagnostics for that rule)
+and one `invalid` fixture (at least one diagnostic); the harness fails if a pair is
+missing, so a new rule cannot land without regression coverage.
 
 See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 (tree-sitter, rule architecture, etc.).

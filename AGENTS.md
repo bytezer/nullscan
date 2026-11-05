@@ -5,7 +5,7 @@
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~1s, 49 tests)
+cargo test --workspace                       # full suite (~1s, 51 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
 cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
 cargo run -p nullscan-cli -- src/ --format sarif
@@ -18,6 +18,8 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 
 - `nullscan-core/` — tree-sitter parsing, the rule registry, per-file rules, cognitive complexity, cross-file duplication. No `serde` in this crate; `Config` is a plain struct.
 - `nullscan-core/src/rule.rs` — **single source of truth** for rule metadata: `RuleMeta`, `RuleScope`, `Rule`, `FileContext`, and the `RULES` registry (including the project-scoped `duplicate-code`).
+- `RULES.md` — human-facing catalog, one row per registry rule: category, closest SonarJS/ESLint equivalent, and implementation status. Update it when adding a rule.
+- `nullscan-core/tests/rules.rs` + `nullscan-core/tests/fixtures/<rule-id>/` — fixture-based regression harness. It discovers fixture directories dynamically and checks `valid.ts|tsx` (zero diagnostics for that rule) and `invalid.ts|tsx` (at least one). Other rules may fire on a fixture; only the rule named by the directory is asserted. Project-scoped rules are skipped.
 - `nullscan-core/src/lang/typescript/rules/` — one module per per-file rule; each exposes `pub fn run(&FileContext) -> Vec<Diagnostic>`. Shared query helper in `query.rs`.
 - `nullscan-core/src/cognitive_complexity.rs` and `duplication.rs` — metric and clone-detection implementations, kept at the crate root; the TypeScript rule module only wraps them.
 - `nullscan-cli/` — clap argument parsing, `nullscan.toml` loading/deserialization, file walking, output formatting (text/SARIF), exit codes.
@@ -33,13 +35,15 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
   - file-scoped rules: `RuleScope::File` and `run: Some(rules::<name>::run)`;
   - project-scoped rules: `RuleScope::Project` and `run: None`, plus their own orchestrator.
 - The registry is the only place the CLI reads rule IDs/descriptions from, so no `RULE_DESCRIPTIONS` update is needed (or possible) in the CLI.
+- Add `nullscan-core/tests/fixtures/<rule-id>/valid.ts` (or `.tsx`) and `invalid.ts` (or `.tsx`). The fixture harness fails any file-scoped registry rule without a pair, so this is part of landing a rule, not optional cleanup. Use `.tsx` for at least one pair when the rule should be guarded under TSX.
+- Add the rule's row to `RULES.md` (category, upstream equivalent, status).
 - Entry order in `RULES` is the diagnostic-emission order for file rules. Existing tests assert exact rule vectors; insert a new rule where its diagnostics should appear rather than reordering existing ones.
 - For a new threshold, add it to `nullscan_core::Config` defaults **and** `FileThresholdsConfig` in `nullscan-cli/src/config.rs` (kebab-case `#[serde(rename = ...)]`).
 - Structural rules with a single `@report` capture should use the shared `query_rule` helper in `rules/query.rs`. Anything that inspects captured text or child counts needs a hand-written rule.
 - **tree-sitter traps** (details and repros in `FINDINGS.md`):
   - `QueryCursor::matches` does not evaluate `#eq?`/`#match?`; filter `node.utf8_text(...)` in Rust.
   - Combining `operator:` with another field (`left:`/`right:`) silently matches nothing in this binding. Match the other field and read the operator text in Rust.
-- Rule tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering) live in `rule.rs`. Update them when behavior changes.
+- Unit tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering) live in `rule.rs`. Fixture-based regression tests live in `nullscan-core/tests/rules.rs`. Update the relevant layer when behavior changes.
 
 ## CLI/file-walking notes
 

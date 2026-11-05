@@ -6,11 +6,15 @@ mod lang {
 }
 mod language;
 mod rule;
+mod scope;
 
 pub use config::Config;
 pub use duplication::{find_duplicates, Duplicate, DuplicateLocation};
 pub use language::Language;
 pub use rule::{FileContext, Rule, RuleMeta, RuleRun, RuleScope, RULES};
+pub use scope::{
+    Binding, BindingKind, Declarator, Reference, Scope, ScopeGraph, ScopeId, ScopeKind,
+};
 
 pub struct Diagnostic {
     pub rule: &'static str,
@@ -22,10 +26,20 @@ pub struct Diagnostic {
 /// Parses `source` as `language` and runs every file-scoped rule not disabled by `config`.
 pub fn analyze(source: &str, language: Language, config: &Config) -> Vec<Diagnostic> {
     let tree = language.parse(source).expect("parse failed");
+
+    // Build the scope graph only when an enabled file-scoped rule actually needs it.
+    let needs_scopes = RULES.iter().any(|rule| {
+        rule.scope == RuleScope::File
+            && rule.requires_scope
+            && config.rule_enabled(rule.meta.id)
+    });
+    let scopes = needs_scopes.then(|| ScopeGraph::build(&tree, source));
+
     let context = FileContext {
         tree: &tree,
         source,
         config,
+        scopes: scopes.as_ref(),
     };
 
     let mut diagnostics = Vec::new();

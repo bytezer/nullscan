@@ -37,7 +37,9 @@ mod tests {
 
     #[test]
     fn allows_let_and_const() {
-        assert!(rules("let x = 1; const y = 2;").is_empty());
+        // Reassign `x` so this test keeps testing syntax choice rather than triggering
+        // the separate `prefer-const` rule.
+        assert!(rules("let x = 1; x = 2; const y = 2;").is_empty());
     }
 
     #[test]
@@ -172,7 +174,9 @@ mod tests {
 
     #[test]
     fn allows_return_of_a_different_identifier() {
-        let src = "function f() { const result = compute(); return other; }";
+        // Keep `result` used so `no-unused-vars` doesn't fire; the point here is that
+        // returning a different identifier is not `prefer-immediate-return`.
+        let src = "function f() { const result = compute(); void result; return other; }";
         assert!(rules(src).is_empty());
     }
 
@@ -500,10 +504,135 @@ mod tests {
 
     #[test]
     fn flags_duplicate_imports() {
-        let duplicated = "import { a } from \"./a\";\nimport { b } from \"./a\";\nexport { a, b };";
+        // Use the imported names so the separate `no-unused-vars` rule stays quiet.
+        let duplicated = "import { a } from \"./a\";\nimport { b } from \"./a\";\nuse(a, b);";
         assert_eq!(rules(duplicated), vec!["no-duplicate-imports"]);
-        let distinct = "import { a } from \"./a\";\nimport { b } from \"./b\";\nexport { a, b };";
+        let distinct = "import { a } from \"./a\";\nimport { b } from \"./b\";\nuse(a, b);";
         assert!(rules(distinct).is_empty());
+    }
+
+    #[test]
+    fn flags_unused_imports_and_local_variables() {
+        assert_eq!(
+            rules("import { unused } from \"./m\";"),
+            vec!["no-unused-vars"]
+        );
+        assert_eq!(
+            rules("function f() { const unused = 1; }"),
+            vec!["no-unused-vars"]
+        );
+        assert!(rules("function f() { const used = 1; log(used); }").is_empty());
+        // Module-level bindings are skipped, and export specifier names are not reads.
+        assert!(rules("const exported = 1; export { exported };").is_empty());
+        // Parameters and function declarations are out of scope for this rule.
+        assert!(rules("function f(unusedParam) { return 1; }").is_empty());
+    }
+
+    #[test]
+    fn flags_each_unused_destructured_binding_separately() {
+        let diagnostics = analyze(
+            "function f() { const { used, unused } = source; return used; }",
+            &Config::default(),
+        );
+        let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
+        assert_eq!(rule_ids, vec!["no-unused-vars"]);
+        assert_eq!(diagnostics[0].message, "'unused' is declared but never used");
+    }
+
+    #[test]
+    fn unused_vars_ignores_underscore_names_and_counts_type_uses() {
+        assert!(rules("function f() { const _ignored = 1; }").is_empty());
+        assert!(
+            rules("import { Foo } from \"./m\";\nexport const value: Foo = make();").is_empty()
+        );
+        assert!(rules("function f() { const value: Foo = make(); log(value); }").is_empty());
+    }
+
+    #[test]
+    fn tsx_counts_component_and_prop_references() {
+        let source = "import { Button } from \"./b\";\nexport function Panel({ label }: { label: string }) { const text = label; return <Button title={text} />; }";
+        let diagnostics = crate::analyze(source, Language::Tsx, &Config::default());
+        let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
+        assert!(rule_ids.is_empty(), "unexpected diagnostics: {rule_ids:?}");
+    }
+
+    #[test]
+    fn flags_shadowed_binding() {
+        let src = "function f() { const value = 1; { const value = 2; use(value); } return value; }";
+        assert_eq!(rules(src), vec!["no-shadow"]);
+        assert!(
+            rules("function f() { const value = 1; { const other = 2; use(other); } return value; }")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_use_before_define_in_the_same_scope() {
+        let src = "function f() { use(value); let value = 1; value = 2; return value; }";
+        assert_eq!(rules(src), vec!["no-use-before-define"]);
+        // `var` is hoisted (the `no-var` rule may fire independently).
+        let var_source = "function f() { use(value); var value = 1; log(value); }";
+        assert!(!rules(var_source).contains(&"no-use-before-define"));
+        // A nested function reference is deliberately not reported.
+        assert!(
+            rules(
+                "function f() { function g() { use(value); } let value = 1; value = 2; }"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_let_that_is_never_reassigned() {
+        assert_eq!(
+            rules("function f() { let value = 1; log(value); }"),
+            vec!["prefer-const"]
+        );
+        assert_eq!(
+            rules("function f() { let { a, b } = source; return a + b; }"),
+            vec!["prefer-const"]
+        );
+        assert!(
+            rules("function f() { let value = 1; value = 2; return value; }").is_empty()
+        );
+        assert!(rules("function f() { let value; value = 1; return value; }").is_empty());
+    }
+
+    #[test]
+    fn flags_redeclaration_in_the_same_scope() {
+        assert_eq!(rules("class A {}\nclass A {}"), vec!["no-redeclare"]);
+        assert!(rules("class A {}\nclass B {}").is_empty());
+    }
+
+    #[test]
+    fn config_can_disable_scope_rules() {
+        let cases = [
+            ("no-unused-vars", "function f() { const unused = 1; }"),
+            (
+                "no-shadow",
+                "function f() { const value = 1; { const value = 2; use(value); } return value; }",
+            ),
+            (
+                "no-use-before-define",
+                "function f() { use(value); let value = 1; value = 2; return value; }",
+            ),
+            ("prefer-const", "function f() { let value = 1; return value; }"),
+            ("no-redeclare", "class A {}\nclass A {}"),
+        ];
+
+        for (rule, source) in cases {
+            assert!(
+                rules(source).contains(&rule),
+                "'{rule}' should fire before being disabled"
+            );
+            let mut config = Config::default();
+            config.disabled_rules.insert(rule.to_string());
+            let diagnostics = analyze(source, &config);
+            assert!(
+                !diagnostics.iter().any(|diagnostic| diagnostic.rule == rule),
+                "'{rule}' still fired after being disabled"
+            );
+        }
     }
 
     fn switch_source(cases: usize) -> String {

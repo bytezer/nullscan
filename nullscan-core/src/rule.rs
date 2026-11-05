@@ -9,6 +9,7 @@
 use tree_sitter::Tree;
 
 use crate::lang::typescript::rules;
+use crate::scope::ScopeGraph;
 use crate::{Config, Diagnostic};
 
 /// Everything a per-file rule needs to inspect one parsed file.
@@ -19,6 +20,8 @@ pub struct FileContext<'a> {
     pub tree: &'a Tree,
     pub source: &'a str,
     pub config: &'a Config,
+    /// Present only when at least one enabled file rule declares `requires_scope`.
+    pub scopes: Option<&'a ScopeGraph>,
 }
 
 /// Fixed metadata every rule exposes to the analyzer, SARIF, and config validation.
@@ -43,6 +46,9 @@ pub type RuleRun = for<'a> fn(&FileContext<'a>) -> Vec<Diagnostic>;
 pub struct Rule {
     pub meta: RuleMeta,
     pub scope: RuleScope,
+    /// Whether the rule needs the per-file [`ScopeGraph`]. The analyzer builds it lazily,
+    /// only when at least one enabled rule sets this to `true`.
+    pub requires_scope: bool,
     pub run: Option<RuleRun>,
 }
 
@@ -58,6 +64,7 @@ pub const RULES: &[Rule] = &[
             description: "Unexpected console call",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_console::run),
     },
     Rule {
@@ -66,6 +73,7 @@ pub const RULES: &[Rule] = &[
             description: "Unexpected 'debugger' statement",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_debugger::run),
     },
     Rule {
@@ -74,6 +82,7 @@ pub const RULES: &[Rule] = &[
             description: "Use 'let' or 'const' instead of 'var'",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_var::run),
     },
     Rule {
@@ -82,6 +91,7 @@ pub const RULES: &[Rule] = &[
             description: "Use '==='/'!==' instead of '=='/'!='",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::eqeqeq::run),
     },
     Rule {
@@ -90,6 +100,7 @@ pub const RULES: &[Rule] = &[
             description: "Avoid the explicit 'any' type",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_explicit_any::run),
     },
     Rule {
@@ -98,6 +109,7 @@ pub const RULES: &[Rule] = &[
             description: "Empty 'catch' block swallows errors",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_empty_catch::run),
     },
     Rule {
@@ -106,6 +118,7 @@ pub const RULES: &[Rule] = &[
             description: "Function is too cognitively complex",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::cognitive_complexity::run),
     },
     Rule {
@@ -114,6 +127,7 @@ pub const RULES: &[Rule] = &[
             description: "String literal duplicated across the file",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_duplicate_string::run),
     },
     Rule {
@@ -122,6 +136,7 @@ pub const RULES: &[Rule] = &[
             description: "Branch condition duplicates an earlier one in the same chain",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_identical_conditions::run),
     },
     Rule {
@@ -130,6 +145,7 @@ pub const RULES: &[Rule] = &[
             description: "Redundant boolean comparison or double negation",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_redundant_boolean::run),
     },
     Rule {
@@ -138,6 +154,7 @@ pub const RULES: &[Rule] = &[
             description: "Variable declared only to be returned immediately",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::prefer_immediate_return::run),
     },
     Rule {
@@ -146,6 +163,7 @@ pub const RULES: &[Rule] = &[
             description: "Nested 'if' can be merged with the outer condition",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_collapsible_if::run),
     },
     Rule {
@@ -154,6 +172,7 @@ pub const RULES: &[Rule] = &[
             description: "Identical expression used on both sides of a binary operator",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_identical_expressions::run),
     },
     Rule {
@@ -162,6 +181,7 @@ pub const RULES: &[Rule] = &[
             description: "Two branches share the same implementation",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_duplicated_branches::run),
     },
     Rule {
@@ -170,6 +190,7 @@ pub const RULES: &[Rule] = &[
             description: "All branches share the same implementation",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_all_duplicated_branches::run),
     },
     Rule {
@@ -178,6 +199,7 @@ pub const RULES: &[Rule] = &[
             description: "Catch block only rethrows the caught error",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_useless_catch::run),
     },
     Rule {
@@ -186,6 +208,7 @@ pub const RULES: &[Rule] = &[
             description: "Redundant 'return' or 'continue' at the end of a block",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_redundant_jump::run),
     },
     Rule {
@@ -194,6 +217,7 @@ pub const RULES: &[Rule] = &[
             description: "Boolean return wrapped in an 'if'/'else'",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::prefer_single_boolean_return::run),
     },
     Rule {
@@ -202,6 +226,7 @@ pub const RULES: &[Rule] = &[
             description: "'switch' statement nested inside another 'switch'",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_nested_switch::run),
     },
     Rule {
@@ -210,6 +235,7 @@ pub const RULES: &[Rule] = &[
             description: "Template literal nested inside another template literal",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_nested_template_literals::run),
     },
     Rule {
@@ -218,6 +244,7 @@ pub const RULES: &[Rule] = &[
             description: "'switch' has too few 'case' clauses",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_small_switch::run),
     },
     Rule {
@@ -226,6 +253,7 @@ pub const RULES: &[Rule] = &[
             description: "'switch' has too many 'case' clauses",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::max_switch_cases::run),
     },
     Rule {
@@ -234,6 +262,7 @@ pub const RULES: &[Rule] = &[
             description: "Conditional starts on the same line as the previous statement",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_same_line_conditional::run),
     },
     Rule {
@@ -242,6 +271,7 @@ pub const RULES: &[Rule] = &[
             description: "Non-existent operator such as '=+' or '=-'",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::non_existent_operator::run),
     },
     Rule {
@@ -250,6 +280,7 @@ pub const RULES: &[Rule] = &[
             description: "Variable assigned to itself",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_self_assign::run),
     },
     Rule {
@@ -258,6 +289,7 @@ pub const RULES: &[Rule] = &[
             description: "Constant condition in 'if' or ternary expression",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_constant_condition::run),
     },
     Rule {
@@ -266,6 +298,7 @@ pub const RULES: &[Rule] = &[
             description: "Comparison with 'NaN' instead of Number.isNaN",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::use_isnan::run),
     },
     Rule {
@@ -274,6 +307,7 @@ pub const RULES: &[Rule] = &[
             description: "Array constructed with the 'Array' constructor",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_array_constructor::run),
     },
     Rule {
@@ -282,6 +316,7 @@ pub const RULES: &[Rule] = &[
             description: "Primitive wrapper object created with 'new'",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_new_wrappers::run),
     },
     Rule {
@@ -290,7 +325,53 @@ pub const RULES: &[Rule] = &[
             description: "Module imported more than once",
         },
         scope: RuleScope::File,
+        requires_scope: false,
         run: Some(rules::no_duplicate_imports::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-unused-vars",
+            description: "Variable or import is declared but never used",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_unused_vars::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-shadow",
+            description: "Variable shadows a binding in an outer scope",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_shadow::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-use-before-define",
+            description: "Binding is used before its declaration",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_use_before_define::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "prefer-const",
+            description: "'let' variable is never reassigned; prefer 'const'",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::prefer_const::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-redeclare",
+            description: "Binding is declared more than once in the same scope",
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_redeclare::run),
     },
     // Cross-file rule: orchestrated by the CLI because it needs every source at once,
     // but still registered here so SARIF and config validation have one catalog.
@@ -300,6 +381,7 @@ pub const RULES: &[Rule] = &[
             description: "Copy-pasted block of code",
         },
         scope: RuleScope::Project,
+        requires_scope: false,
         run: None,
     },
 ];
@@ -377,6 +459,11 @@ mod tests {
             "no-array-constructor",
             "no-new-wrappers",
             "no-duplicate-imports",
+            "no-unused-vars",
+            "no-shadow",
+            "no-use-before-define",
+            "prefer-const",
+            "no-redeclare",
             "duplicate-code",
         ] {
             assert!(ids.contains(id), "expected rule '{id}' to be registered");
@@ -434,7 +521,46 @@ mod tests {
                 "no-array-constructor",
                 "no-new-wrappers",
                 "no-duplicate-imports",
+                "no-unused-vars",
+                "no-shadow",
+                "no-use-before-define",
+                "prefer-const",
+                "no-redeclare",
             ]
         );
+    }
+
+    #[test]
+    fn scope_rules_require_the_scope_graph() {
+        for id in [
+            "no-unused-vars",
+            "no-shadow",
+            "no-use-before-define",
+            "prefer-const",
+            "no-redeclare",
+        ] {
+            let rule = RULES
+                .iter()
+                .find(|rule| rule.meta.id == id)
+                .unwrap_or_else(|| panic!("missing rule '{id}'"));
+            assert!(rule.requires_scope, "'{id}' should require scope analysis");
+        }
+
+        for rule in RULES.iter().filter(|rule| {
+            !matches!(
+                rule.meta.id,
+                "no-unused-vars"
+                    | "no-shadow"
+                    | "no-use-before-define"
+                    | "prefer-const"
+                    | "no-redeclare"
+            )
+        }) {
+            assert!(
+                !rule.requires_scope,
+                "existing rule '{}' should not opt into scope analysis",
+                rule.meta.id
+            );
+        }
     }
 }

@@ -5,7 +5,7 @@
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~12s, 78 tests)
+cargo test --workspace                       # full suite (~15s, 98 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
 cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
 cargo run -p nullscan-cli -- src/ --format sarif
@@ -20,10 +20,11 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - `nullscan-core/src/rule.rs` — **single source of truth** for rule metadata: `RuleMeta`, `RuleScope`, `Rule`, `FileContext`, and the `RULES` registry (including the project-scoped `duplicate-code`).
 - `RULES.md` — human-facing catalog, one row per registry rule: category, closest SonarJS/ESLint equivalent, and implementation status. Update it when adding a rule.
 - `nullscan-core/tests/rules.rs` + `nullscan-core/tests/fixtures/<rule-id>/` — fixture-based regression harness. It discovers fixture directories dynamically and checks `valid.ts|tsx` (zero diagnostics for that rule) and `invalid.ts|tsx` (at least one). Other rules may fire on a fixture; only the rule named by the directory is asserted. Project-scoped rules are skipped.
-- `nullscan-core/src/lang/typescript/rules/` — one module per per-file rule; each exposes `pub fn run(&FileContext) -> Vec<Diagnostic>`. Shared query helper in `query.rs`.
+- `nullscan-core/src/scope.rs` — owned per-file lexical scope graph (`ScopeGraph`): module/function/block/catch/class/loop/switch scopes, binding kinds, and references with read/write counts. No tree-sitter `Node` values are stored. Built lazily by `analyze` only when an enabled file rule has `requires_scope: true`.
+- `nullscan-core/src/lang/typescript/rules/` — one module per per-file rule; each exposes `pub fn run(&FileContext) -> Vec<Diagnostic>`. Shared query helper in `query.rs`. Scope-dependent rules read `ctx.scopes` and return early when it is `None`.
 - `nullscan-core/src/cognitive_complexity.rs` and `duplication.rs` — metric and clone-detection implementations, kept at the crate root; the TypeScript rule module only wraps them.
 - `nullscan-cli/` — clap argument parsing, `nullscan.toml` loading/deserialization, file walking, output formatting (text/SARIF), exit codes.
-- `nullscan_core::analyze()` (in `lib.rs`) parses once, builds one `FileContext { tree, source, config }`, and runs every enabled `RuleScope::File` entry from `RULES` in registry order. The public `analyze(source, language, config)` signature is unchanged. TS and TSX share one rule set, so queries must be built with `tree.language()` rather than a hard-coded grammar.
+- `nullscan_core::analyze()` (in `lib.rs`) parses once, builds one `FileContext { tree, source, config, scopes }`, and runs every enabled `RuleScope::File` entry from `RULES` in registry order. It builds the `ScopeGraph` only when at least one enabled file rule sets `requires_scope: true`, then passes it as `ctx.scopes`; otherwise that field is `None`. The public `analyze(source, language, config)` signature is unchanged. TS and TSX share one rule set, so queries must be built with `tree.language()` rather than a hard-coded grammar.
 - Cross-file `duplicate-code` is registered in `RULES` as `RuleScope::Project` with `run: None`; the CLI orchestrates it in `find_duplicates` because it needs all sources. Rules needing whole-project context do not belong in `analyze()`.
 - The CLI's SARIF catalog and `rules.disabled` validation both read `nullscan_core::RULES`; there is no duplicate metadata list in the CLI.
 - Exit code is 1 if any diagnostic or duplicate is found, else 0. `rayon` parallel maps collect in input order, so output order stays deterministic; preserve that when touching the pipeline.
@@ -31,9 +32,10 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 ## Adding or changing a rule
 
 - Add the implementation under `nullscan-core/src/lang/typescript/rules/` (one file per rule, `pub fn run(&FileContext<'_>) -> Vec<Diagnostic>`).
-- Register it **exactly once** in `RULES` in `nullscan-core/src/rule.rs`, with its `RuleMeta` (id + description), `RuleScope`, and runner:
-  - file-scoped rules: `RuleScope::File` and `run: Some(rules::<name>::run)`;
-  - project-scoped rules: `RuleScope::Project` and `run: None`, plus their own orchestrator.
+- Register it **exactly once** in `RULES` in `nullscan-core/src/rule.rs`, with its `RuleMeta` (id + description), `RuleScope`, `requires_scope`, and runner:
+  - file-scoped rules: `RuleScope::File`, `requires_scope: false`, and `run: Some(rules::<name>::run)`;
+  - scope-dependent file rules: same, but `requires_scope: true`, and read `ctx.scopes` (returning early if it is `None`);
+  - project-scoped rules: `RuleScope::Project`, `requires_scope: false`, and `run: None`, plus their own orchestrator.
 - The registry is the only place the CLI reads rule IDs/descriptions from, so no `RULE_DESCRIPTIONS` update is needed (or possible) in the CLI.
 - Add `nullscan-core/tests/fixtures/<rule-id>/valid.ts` (or `.tsx`) and `invalid.ts` (or `.tsx`). The fixture harness fails any file-scoped registry rule without a pair, so this is part of landing a rule, not optional cleanup. Use `.tsx` for at least one pair when the rule should be guarded under TSX.
 - Add the rule's row to `RULES.md` (category, upstream equivalent, status).
@@ -43,7 +45,8 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - **tree-sitter traps** (details and repros in `FINDINGS.md`):
   - `QueryCursor::matches` does not evaluate `#eq?`/`#match?`; filter `node.utf8_text(...)` in Rust.
   - Combining `operator:` with another field (`left:`/`right:`) silently matches nothing in this binding. Match the other field and read the operator text in Rust.
-- Unit tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering) live in `rule.rs`. Fixture-based regression tests live in `nullscan-core/tests/rules.rs`. Update the relevant layer when behavior changes.
+- Scope-dependent rules read the owned `ScopeGraph` in `scope.rs`; never store tree-sitter `Node` values in it. Scope unit tests (function vs block scoping, shadowing, hoisting, parameters, imports, destructuring, read/write counts, globals, loops/switches) live in `scope.rs`; update them when resolution changes.
+- Unit tests stay centrally in `nullscan-core/src/lang/typescript.rs` and assert exact rule vectors; cognitive complexity asserts exact scores. Registry sanity tests (unique IDs, non-empty descriptions, `duplicate-code`, stable ordering, `requires_scope`) live in `rule.rs`. Fixture-based regression tests live in `nullscan-core/tests/rules.rs`. Update the relevant layer when behavior changes.
 
 ## CLI/file-walking notes
 

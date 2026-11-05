@@ -99,6 +99,11 @@ project-scoped `duplicate-code`).
 | `no-array-constructor` | Ambiguous `Array(...)` / `new Array(...)` calls |
 | `no-new-wrappers` | `new String(...)`, `new Number(...)`, `new Boolean(...)` |
 | `no-duplicate-imports` | Multiple imports from the same module |
+| `no-unused-vars` | Unused imports and unused local variables |
+| `no-shadow` | A binding shadows a name from an enclosing scope |
+| `no-use-before-define` | A `let`/`const`/`class` use before its same-scope declaration |
+| `prefer-const` | `let` declarator that is never reassigned |
+| `no-redeclare` | A second binding with the same name in one scope |
 
 ## Performance
 
@@ -130,6 +135,7 @@ What's shipped, and what's next.
 - [x] CLI with per-file diagnostics and exit codes for CI
 - [x] Multi-file / directory input (glob via shell expansion)
 - [x] Parallelized analysis (`rayon`)
+- [x] Reusable per-file lexical scope graph (bindings, references, read/write counts)
 - [x] SARIF output for CI/editor integration
 - [ ] VS Code extension (surface diagnostics inline as you type)
 - [x] Configurable rule thresholds and disabling (`nullscan.toml` / `--config`)
@@ -167,7 +173,11 @@ What's shipped, and what's next.
 - [x] `no-array-constructor` — ambiguous `Array` constructors
 - [x] `no-new-wrappers` — primitive wrapper objects
 - [x] `no-duplicate-imports` — repeated imports from one module
-- [ ] `no-unused-vars` / `no-unused-imports`
+- [x] `no-unused-vars` — unused imports and local variables
+- [x] `no-shadow` — bindings shadowing an outer scope
+- [x] `no-use-before-define` — same-scope use before declaration
+- [x] `prefer-const` — `let` variables that are never reassigned
+- [x] `no-redeclare` — duplicate bindings in one scope
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`
 - [ ] `cognitive-complexity` at class/file level

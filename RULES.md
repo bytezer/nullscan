@@ -41,6 +41,11 @@ equivalent exists, the cell says so rather than guessing an ID. Category values 
 | `no-array-constructor` | code smell | SonarJS S1528 `array-constructor`; ESLint/typescript-eslint `no-array-constructor` | Implemented (file-scoped) |
 | `no-new-wrappers` | bug | SonarJS S1533 `no-primitive-wrappers`; ESLint `no-new-wrappers` | Implemented (file-scoped) |
 | `no-duplicate-imports` | code smell | SonarJS S3863 `no-duplicate-imports` (via eslint-plugin-import `no-duplicates`); ESLint `no-duplicate-imports` | Implemented (file-scoped) |
+| `no-unused-vars` | code smell | SonarJS S1481 (unused local variables); ESLint/typescript-eslint `no-unused-vars` | Implemented (file-scoped; scope analysis) |
+| `no-shadow` | code smell | SonarJS S1117 `no-shadow`; typescript-eslint `no-shadow`; ESLint `no-shadow` | Implemented (file-scoped; scope analysis) |
+| `no-use-before-define` | bug | SonarJS S3827 (variables should be defined before being used); ESLint/typescript-eslint `no-use-before-define` | Implemented (file-scoped; same-scope, scope analysis) |
+| `prefer-const` | code smell | SonarJS S3353 `prefer-const`; ESLint `prefer-const` | Implemented (file-scoped; scope analysis) |
+| `no-redeclare` | code smell | SonarJS S2814 `no-redeclare`; ESLint/typescript-eslint `no-redeclare` | Implemented (file-scoped; scope analysis) |
 | `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI) |
 
 ### Conservative limits
@@ -72,13 +77,41 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
   and `Boolean` identifiers.
 - `no-duplicate-imports` compares exact module source strings and ignores `export ... from`.
 
+### Scope-analysis limits
+
+These rules use the per-file lexical scope graph (`nullscan-core/src/scope.rs`). It is not
+a control-flow graph, data-flow analysis, or type checker:
+
+- `no-unused-vars` reports unused imports anywhere and unused `let`/`const`/`var`
+  bindings inside functions or nested blocks. Module-level variables, parameters,
+  function/class declarations, and names starting with `_` are ignored. Destructured
+  bindings are checked individually. Type-position uses count as reads, but export
+  specifier names do not, so `import { a } ...; export { a };` can still be reported as
+  unused.
+- `no-shadow` reports a binding whose name exists in an enclosing lexical scope. Same-scope
+  duplicates are intentionally left to `no-redeclare`. Parameters, catch parameters,
+  imports, functions, classes, and `let`/`const`/`var` are covered.
+- `no-use-before-define` only reports `let`/`const`/`class` references that appear earlier
+  in the *same* lexical scope. References inside nested functions or blocks are not
+  reported even if they might run sooner; `var` and function declarations are hoisted and
+  never reported, and unresolved globals are ignored.
+- `prefer-const` reports a `let` declarator with an initializer when its bindings have no
+  recorded writes. Writes are lexical, not path-sensitive, so a write in dead code still
+  suppresses the diagnostic (a deliberate false negative). Declarators without an
+  initializer and `for ... of`/`for ... in` bindings are skipped; destructuring is reported
+  once per declarator.
+- `no-redeclare` reports the second binding with the same name in one scope. Because
+  tree-sitter is error-tolerant, syntax-invalid redeclarations that a TypeScript compiler
+  would reject can still produce a diagnostic.
+
 ## Adding a rule
 
 1. Implement it under `nullscan-core/src/lang/typescript/rules/` as
    `pub fn run(&FileContext<'_>) -> Vec<Diagnostic>`.
 2. Register it exactly once in `RULES` in `nullscan-core/src/rule.rs` with its
-   `RuleMeta`, `RuleScope`, and runner (project-scoped rules use `run: None` plus an
-   orchestrator).
+   `RuleMeta`, `RuleScope`, `requires_scope`, and runner (project-scoped rules use
+   `run: None` plus an orchestrator). Scope-dependent file rules set
+   `requires_scope: true` and read `ctx.scopes`.
 3. Add `nullscan-core/tests/fixtures/<rule-id>/valid.ts` (or `.tsx`) and
    `invalid.ts` (or `.tsx`). The fixture harness at `nullscan-core/tests/rules.rs`
    discovers the directory from the rule ID and asserts that `valid.*` is clean for

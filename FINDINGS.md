@@ -20,8 +20,8 @@ shape, literal tokens like `"var"` or `"=="` inside the pattern). Any condition 
 captured node's *content/text* gets filtered in Rust after `cursor.matches(...)`, not
 in the query predicate.
 
-See `no_console_rule` and `no_explicit_any_rule` in `nullscan-core/src/lib.rs` for the
-pattern to follow.
+See `nullscan-core/src/lang/typescript/rules/no_console.rs` and
+`nullscan-core/src/lang/typescript/rules/no_explicit_any.rs` for the pattern to follow.
 
 ## tree-sitter: an `operator:` field constraint can't be combined with another field constraint
 
@@ -41,4 +41,4 @@ matches — no error to notice, just a rule that never fires.
 choice of several anonymous tokens) needs both an operator check and a check on
 `left`/`right`, don't put both in the query. Match on `left`/`right` alone and read the
 `operator` field's text manually in Rust afterward — same shape as the `#eq?` workaround
-above. See `no_redundant_boolean_comparison_rule` in `nullscan-core/src/lib.rs`.
+above. See `nullscan-core/src/lang/typescript/rules/no_redundant_boolean.rs`.

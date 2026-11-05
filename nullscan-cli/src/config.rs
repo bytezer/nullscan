@@ -7,8 +7,6 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::sarif::RULE_DESCRIPTIONS;
-
 #[derive(Deserialize, Default)]
 struct FileConfig {
     rules: Option<FileRulesConfig>,
@@ -57,7 +55,8 @@ pub fn load(explicit_path: Option<&str>) -> Result<nullscan_core::Config, String
 
     if let Some(rules) = file_config.rules {
         if let Some(disabled) = rules.disabled {
-            let known_ids: Vec<&str> = RULE_DESCRIPTIONS.iter().map(|(id, _)| *id).collect();
+            let known_ids: Vec<&str> =
+                nullscan_core::RULES.iter().map(|rule| rule.meta.id).collect();
             for name in &disabled {
                 if !known_ids.contains(&name.as_str()) {
                     eprintln!("warning: {path} disables unknown rule '{name}'");

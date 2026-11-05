@@ -5,27 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
-use nullscan_core::{Diagnostic, Duplicate};
+use nullscan_core::{Diagnostic, Duplicate, RULES};
 use serde::Serialize;
-
-/// Short, rule-agnostic descriptions for the SARIF rule catalog. Diagnostic messages
-/// carry the specific detail (a count, a name); this is the fixed "what is this rule"
-/// blurb every occurrence shares.
-pub(crate) const RULE_DESCRIPTIONS: &[(&str, &str)] = &[
-    ("no-console", "Unexpected console call"),
-    ("no-debugger", "Unexpected 'debugger' statement"),
-    ("no-var", "Use 'let' or 'const' instead of 'var'"),
-    ("eqeqeq", "Use '==='/'!==' instead of '=='/'!='"),
-    ("no-explicit-any", "Avoid the explicit 'any' type"),
-    ("no-empty-catch", "Empty 'catch' block swallows errors"),
-    ("cognitive-complexity", "Function is too cognitively complex"),
-    ("no-duplicate-string", "String literal duplicated across the file"),
-    ("no-identical-conditions", "Branch condition duplicates an earlier one in the same chain"),
-    ("no-redundant-boolean", "Redundant boolean comparison or double negation"),
-    ("prefer-immediate-return", "Variable declared only to be returned immediately"),
-    ("no-collapsible-if", "Nested 'if' can be merged with the outer condition"),
-    ("duplicate-code", "Copy-pasted block of code"),
-];
 
 #[derive(Serialize)]
 struct Log {
@@ -147,9 +128,12 @@ pub fn render(diagnostics: &[(PathBuf, Vec<Diagnostic>)], duplicates: &[Duplicat
         });
     }
 
-    let rules = RULE_DESCRIPTIONS
+    let rules = RULES
         .iter()
-        .map(|(id, desc)| Rule { id, short_description: Text { text: desc } })
+        .map(|rule| Rule {
+            id: rule.meta.id,
+            short_description: Text { text: rule.meta.description },
+        })
         .collect();
 
     let log = Log {

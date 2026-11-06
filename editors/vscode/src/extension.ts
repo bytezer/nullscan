@@ -21,6 +21,13 @@ import {
   removeCachedServer,
   type DownloadServerResult,
 } from "./download";
+import {
+  DOCS_BASE_URL,
+  docsUrlOf,
+  indexRules,
+  ruleIdOfArgument,
+  type RuleInfo,
+} from "./rules";
 import { readSettings } from "./settings";
 import {
   StatusBar,
@@ -70,6 +77,7 @@ class NullscanExtension implements vscode.Disposable {
   private readonly summaryPanel: SummaryPanel;
   private readonly issues: IssuesController;
   private cachedSummary: SummaryResponse = { summary: null, stale: true };
+  private rules: ReadonlyMap<string, RuleInfo> = new Map();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -352,10 +360,11 @@ class NullscanExtension implements vscode.Disposable {
   }
 
   private registerCommands(): vscode.Disposable[] {
-    const commands: Array<[string, () => unknown]> = [
+    const commands: Array<[string, (...args: unknown[]) => unknown]> = [
       ["nullscan.analyzeWorkspace", () => this.analyzeWorkspace()],
       ["nullscan.showSummary", () => this.showSummary()],
       ["nullscan.openConfig", () => this.openConfig()],
+      ["nullscan.showRuleDocumentation", (argument) => this.showRuleDocumentation(argument)],
       ["nullscan.redownloadServer", () => this.redownloadServer()],
       ["nullscan.restartServer", () => this.restartServer()],
       ["nullscan.refreshIssues", () => this.issues.refresh()],
@@ -493,7 +502,22 @@ class NullscanExtension implements vscode.Disposable {
       return;
     }
 
+    await this.loadRuleCatalog(client);
     await this.refresh();
+  }
+
+  /** `nullscan/rules`; an empty map means titles fall back to the rule ids. */
+  private async loadRuleCatalog(client: LanguageClient): Promise<void> {
+    try {
+      const catalog = await client.sendRequest<RuleInfo[]>("nullscan/rules");
+      this.rules = indexRules(Array.isArray(catalog) ? catalog : []);
+    } catch (error) {
+      this.output.appendLine(
+        `Nullscan: could not read the rule catalog: ${messageOf(error)}`,
+      );
+      this.rules = new Map();
+    }
+    this.issues.setRules(this.rules);
   }
 
   private async refresh(): Promise<void> {
@@ -563,7 +587,37 @@ class NullscanExtension implements vscode.Disposable {
       summary: this.cachedSummary.summary,
       stale: this.cachedSummary.stale,
       configPath: resolveConfigPath(),
+      rules: this.rules,
     };
+  }
+
+  /**
+   * Opens a rule's `RULES.md` anchor. Tree nodes arrive as their element with a
+   * `rule` field; from the palette the catalog drives a QuickPick.
+   */
+  private async showRuleDocumentation(argument?: unknown): Promise<void> {
+    const ruleId = ruleIdOfArgument(argument);
+    if (ruleId !== undefined) {
+      await openDocumentation(docsUrlOf(this.rules, ruleId));
+      return;
+    }
+
+    const items = [...this.rules.values()].map((rule) => ({
+      label: rule.title,
+      description: rule.id,
+      url: rule.docs_url,
+    }));
+    if (items.length === 0) {
+      await openDocumentation(DOCS_BASE_URL);
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: "Select a rule to open its documentation",
+    });
+    if (picked !== undefined) {
+      await openDocumentation(picked.url);
+    }
   }
 
   private async openConfig(): Promise<void> {
@@ -678,6 +732,10 @@ function runVersion(binaryPath: string): Promise<string> {
 
 async function openNullscanSettings(section: string): Promise<void> {
   await vscode.commands.executeCommand("workbench.action.openSettings", section);
+}
+
+async function openDocumentation(url: string): Promise<void> {
+  await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 
 function firstWorkspaceFolder(): string | undefined {

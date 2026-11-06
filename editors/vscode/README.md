@@ -47,6 +47,8 @@ missing file logs a warning and the server keeps running with the default rules.
 - `Nullscan: Analyze Workspace` — scan every workspace folder and publish duplicates.
 - `Nullscan: Show Summary` — open the summary panel.
 - `Nullscan: Refresh Issues` — rebuild the issue trees from the current diagnostics.
+- `Nullscan: Show Rule Documentation` — open a rule's `RULES.md` section. From the palette it
+  asks which rule; on a **By Rule** node it opens that rule directly.
 - `Nullscan: Open Config` — open (or create) the workspace folder's `nullscan.toml`.
 - `Nullscan: Redownload Server` — delete the cached binary and download it again.
 - `Nullscan: Restart Server` — restart the language server, for example after changing `nullscan.path`.
@@ -56,8 +58,9 @@ missing file logs a warning and the server keeps running with the default rules.
 The activity bar container **Nullscan** hosts two trees, both built from the diagnostics
 VS Code already holds (filtered to `source: "nullscan"`), not from a separate server call:
 
-- **By Rule** groups issues by rule id, sorted by count and using the group's worst severity
-  as its icon.
+- **By Rule** groups issues by rule, shows the rule's human name from the server catalog
+  with the rule id as its description, and uses the group's worst severity as its icon.
+  Right-click a rule and choose **Show Rule Documentation** to open its `RULES.md` section.
 - **By File** groups issues by workspace-relative path, most issues first.
 
 Clicking an issue opens the document and reveals its range. The trees refresh automatically
@@ -65,10 +68,16 @@ after diagnostics changes and after **Nullscan: Analyze Workspace**; the title-b
 runs **Nullscan: Refresh Issues**. When there are no issues, the views offer a link to
 **Analyze Workspace**.
 
+The rule names, rationales and documentation links come from the server's
+`nullscan/rules` request, fetched once after the language server starts and again after a
+restart. Until it answers — or with a server that predates it — the trees and the summary
+fall back to the rule ids and the generic `RULES.md` page.
+
 ## Summary
 
 **Nullscan: Show Summary** opens (or reveals) a single *Nullscan summary* panel with severity
-totals, total issues, files with issues, the top 10 rules, the top 10 hot files, the last
+totals, total issues, files with issues, the top 10 rules (human name plus rule id), the top
+10 hot files, the last
 scan's file count, duration, duplicates and truncation flag, a *stale* badge when the
 workspace changed after the scan, and the resolved `nullscan.toml` path. Its **Rescan** and
 **Open config** buttons run the matching commands. The panel is plain HTML/CSS with a strict

@@ -7,6 +7,7 @@ import {
   type Issue,
   type IssueSeverity,
 } from "./aggregate";
+import { titleOf, whyOf, type RuleInfo } from "./rules";
 import { formatIssueCount } from "./summary";
 
 export const VIEW_BY_RULE = "nullscan.byRule";
@@ -81,6 +82,12 @@ export class IssuesController implements vscode.Disposable {
     return this.issues;
   }
 
+  /** Rule titles and rationales from `nullscan/rules`; empty until it answers. */
+  setRules(rules: ReadonlyMap<string, RuleInfo>): void {
+    this.byRuleProvider.setRules(rules);
+    this.byFileProvider.setRules(rules);
+  }
+
   /** Re-reads diagnostics now; used by the refresh command and after scans. */
   refresh(): void {
     this.issues = collectIssues();
@@ -131,6 +138,7 @@ class IssuesProvider implements vscode.TreeDataProvider<IssueNode> {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   private issues: readonly Issue[] = [];
+  private rules: ReadonlyMap<string, RuleInfo> = new Map();
 
   constructor(private readonly mode: TreeMode) {}
 
@@ -139,10 +147,15 @@ class IssuesProvider implements vscode.TreeDataProvider<IssueNode> {
     this.changed.fire();
   }
 
+  setRules(rules: ReadonlyMap<string, RuleInfo>): void {
+    this.rules = rules;
+    this.changed.fire();
+  }
+
   getTreeItem(node: IssueNode): vscode.TreeItem {
     switch (node.kind) {
       case "rule":
-        return ruleItem(node);
+        return ruleItem(node, this.rules);
       case "file":
         return fileItem(node);
       case "issue":
@@ -197,14 +210,30 @@ function childrenOfFile(issues: readonly Issue[], file: string): IssueNode[] {
     .map((issue) => ({ kind: "issue", issue, context: "file" }));
 }
 
-function ruleItem(node: RuleNode): vscode.TreeItem {
-  const item = new vscode.TreeItem(node.rule, vscode.TreeItemCollapsibleState.Collapsed);
+function ruleItem(node: RuleNode, rules: ReadonlyMap<string, RuleInfo>): vscode.TreeItem {
+  const title = titleOf(rules, node.rule);
+  const item = new vscode.TreeItem(title, vscode.TreeItemCollapsibleState.Collapsed);
   item.id = `rule:${node.rule}`;
-  item.description = String(node.count);
+  item.description = node.rule;
   item.iconPath = SEVERITY_ICONS[node.severity];
-  item.tooltip = formatIssueCount(node.count);
+  item.tooltip = ruleTooltip(node, title, rules);
   item.contextValue = "nullscan.ruleGroup";
   return item;
+}
+
+function ruleTooltip(
+  node: RuleNode,
+  title: string,
+  rules: ReadonlyMap<string, RuleInfo>,
+): vscode.MarkdownString {
+  const tooltip = new vscode.MarkdownString();
+  tooltip.appendMarkdown(`**${title}** (\`${node.rule}\`)\n\n`);
+  const why = whyOf(rules, node.rule);
+  if (why.length > 0) {
+    tooltip.appendMarkdown(`${why}\n\n`);
+  }
+  tooltip.appendMarkdown(formatIssueCount(node.count));
+  return tooltip;
 }
 
 function fileItem(node: FileNode): vscode.TreeItem {

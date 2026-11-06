@@ -10,6 +10,7 @@ import {
   type Issue,
   type RuleGroup,
 } from "./aggregate";
+import { titleOf, type RuleInfo } from "./rules";
 import { formatDuration, type SummaryPayload } from "./summary";
 
 export interface SummaryViewState {
@@ -17,6 +18,7 @@ export interface SummaryViewState {
   summary: SummaryPayload | null;
   stale: boolean;
   configPath: string;
+  rules: ReadonlyMap<string, RuleInfo>;
 }
 
 /** The two buttons live in the webview; the extension owns what they do. */
@@ -111,7 +113,7 @@ export function resolveConfigPath(): string {
 export function renderSummaryHtml(state: SummaryViewState, nonce: string): string {
   const totals = severityTotals(state.issues);
   const files = groupByFile(state.issues);
-  const rules = groupByRule(state.issues).slice(0, TOP_LIMIT);
+  const topRuleGroups = groupByRule(state.issues).slice(0, TOP_LIMIT);
   const total = totals.error + totals.warning + totals.info;
   const stale = state.stale && state.summary !== null;
   return `<!DOCTYPE html>
@@ -139,7 +141,7 @@ ${card("Files with issues", String(files.length), "total")}
 ${scanSection(state.summary)}
 <section>
 <h2>Top rules</h2>
-${ruleTable(rules)}
+${ruleTable(topRuleGroups, state.rules)}
 </section>
 <section>
 <h2>Hot files</h2>
@@ -208,6 +210,8 @@ th, td { padding: 5px 8px; text-align: left; vertical-align: top; border-bottom:
 th { font-weight: 600; opacity: 0.8; }
 .num { text-align: right; }
 .mono { margin: 0; font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; }
+.rule-title { display: block; font-weight: 600; }
+.rule-id { display: block; opacity: 0.7; font-size: 0.85em; }
 .sev { font-size: 0.85em; text-transform: uppercase; }
 .sev-error { color: var(--vscode-errorForeground); }
 .sev-warning { color: var(--vscode-editorWarning-foreground); }
@@ -264,14 +268,14 @@ ${truncated}
 </section>`;
 }
 
-function ruleTable(groups: readonly RuleGroup[]): string {
+function ruleTable(groups: readonly RuleGroup[], rules: ReadonlyMap<string, RuleInfo>): string {
   if (groups.length === 0) {
     return '<p class="empty">No issues found.</p>';
   }
   const rows = groups
     .map(
       (group) => `<tr>
-<td class="mono">${escapeHtml(group.rule)}</td>
+<td>${ruleLabel(group.rule, rules)}</td>
 <td><span class="sev sev-${group.severity}">${group.severity}</span></td>
 <td class="num">${group.count}</td>
 </tr>`,
@@ -283,6 +287,15 @@ function ruleTable(groups: readonly RuleGroup[]): string {
 ${rows}
 </tbody>
 </table>`;
+}
+
+/** Human title first, rule id underneath; the id alone until the catalog answers. */
+function ruleLabel(rule: string, rules: ReadonlyMap<string, RuleInfo>): string {
+  const title = titleOf(rules, rule);
+  if (title === rule) {
+    return `<span class="mono">${escapeHtml(title)}</span>`;
+  }
+  return `<span class="rule-title">${escapeHtml(title)}</span><span class="rule-id mono">${escapeHtml(rule)}</span>`;
 }
 
 function fileTable(groups: readonly FileGroup[]): string {

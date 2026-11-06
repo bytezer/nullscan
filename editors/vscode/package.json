@@ -42,6 +42,11 @@
         "category": "Nullscan"
       },
       {
+        "command": "nullscan.showRuleDocumentation",
+        "title": "Show Rule Documentation",
+        "category": "Nullscan"
+      },
+      {
         "command": "nullscan.refreshIssues",
         "title": "Refresh Issues",
         "category": "Nullscan",
@@ -104,6 +109,13 @@
         {
           "command": "nullscan.refreshIssues",
           "when": "view == nullscan.byFile",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "nullscan.showRuleDocumentation",
+          "when": "view == nullscan.byRule && viewItem == nullscan.ruleGroup",
           "group": "navigation"
         }
       ]

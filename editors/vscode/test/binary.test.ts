@@ -4,6 +4,8 @@ import {
   parseServerVersion,
   resolveServerBinary,
   serverTarget,
+  serverTriple,
+  serverVersionMatches,
   type ResolveBinaryResult,
 } from "../src/binary";
 
@@ -17,6 +19,8 @@ interface ResolveInput {
   platform?: string;
   arch?: string;
   envPath?: string;
+  downloadedPath?: string;
+  includePath?: boolean;
 }
 
 function resolve(input: ResolveInput): ResolveBinaryResult {
@@ -27,6 +31,8 @@ function resolve(input: ResolveInput): ResolveBinaryResult {
     platform = "linux",
     arch = "x64",
     envPath = "",
+    downloadedPath,
+    includePath,
   } = input;
   return resolveServerBinary({
     configuredPath,
@@ -34,6 +40,8 @@ function resolve(input: ResolveInput): ResolveBinaryResult {
     platform,
     arch,
     envPath,
+    downloadedPath,
+    includePath,
     isExecutable: (candidate) => existing.includes(candidate),
   });
 }
@@ -81,6 +89,40 @@ describe("resolveServerBinary", () => {
     );
 
     expect(result).toEqual({ path: BUNDLED, source: "bundled" });
+  });
+
+  it("prefers the bundled binary over the downloaded cache", () => {
+    const downloaded = "/storage/server/0.1.0/nullscan-lsp";
+    const result = expectResolved(
+      resolve({ existing: [BUNDLED, downloaded], downloadedPath: downloaded }),
+    );
+
+    expect(result).toEqual({ path: BUNDLED, source: "bundled" });
+  });
+
+  it("prefers the downloaded cache over PATH", () => {
+    const downloaded = "/storage/server/0.1.0/nullscan-lsp";
+    const result = expectResolved(
+      resolve({
+        existing: [downloaded, "/usr/local/bin/nullscan-lsp"],
+        downloadedPath: downloaded,
+        envPath: "/usr/local/bin",
+      }),
+    );
+
+    expect(result).toEqual({ path: downloaded, source: "download" });
+  });
+
+  it("skips PATH when includePath is false", () => {
+    const result = expectFailure(
+      resolve({
+        existing: ["/usr/local/bin/nullscan-lsp"],
+        envPath: "/usr/local/bin",
+        includePath: false,
+      }),
+    );
+
+    expect(result.candidates).toEqual([BUNDLED]);
   });
 
   it("searches PATH in order after the bundled binary", () => {
@@ -171,6 +213,35 @@ describe("serverTarget", () => {
   it("rejects unknown combinations", () => {
     expect(serverTarget("freebsd", "x64")).toBeUndefined();
     expect(serverTarget("linux", "ia32")).toBeUndefined();
+  });
+});
+
+describe("serverTriple", () => {
+  it("maps the supported pairs to release triples", () => {
+    expect(serverTriple("linux", "x64")).toBe("x86_64-unknown-linux-gnu");
+    expect(serverTriple("linux", "arm64")).toBe("aarch64-unknown-linux-gnu");
+    expect(serverTriple("darwin", "x64")).toBe("x86_64-apple-darwin");
+    expect(serverTriple("darwin", "arm64")).toBe("aarch64-apple-darwin");
+    expect(serverTriple("win32", "x64")).toBe("x86_64-pc-windows-msvc");
+  });
+
+  it("rejects unknown combinations", () => {
+    expect(serverTriple("freebsd", "x64")).toBeUndefined();
+    expect(serverTriple("win32", "arm64")).toBeUndefined();
+  });
+});
+
+describe("serverVersionMatches", () => {
+  it("compares the semver core and ignores pre-release tags", () => {
+    expect(serverVersionMatches("0.1.0", "0.1.0")).toBe(true);
+    expect(serverVersionMatches("0.1.0-beta.2", "0.1.0")).toBe(true);
+    expect(serverVersionMatches("0.1.0", "0.1.0-beta.2")).toBe(true);
+    expect(serverVersionMatches("v0.1.0", "0.1.0+build.7")).toBe(true);
+  });
+
+  it("detects different versions", () => {
+    expect(serverVersionMatches("0.1.0", "0.2.0")).toBe(false);
+    expect(serverVersionMatches("0.1.0", "")).toBe(false);
   });
 });
 

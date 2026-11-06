@@ -7,7 +7,18 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
-import { parseServerVersion, resolveServerBinary, type BinarySource } from "./binary";
+import {
+  parseServerVersion,
+  resolveServerBinary,
+  serverVersionMatches,
+  type BinarySource,
+} from "./binary";
+import {
+  cachedServerLocation,
+  downloadServer,
+  removeCachedServer,
+  type DownloadServerResult,
+} from "./download";
 import { readSettings } from "./settings";
 import {
   StatusBar,
@@ -19,11 +30,14 @@ import {
 } from "./summary";
 
 const VERSION_TIMEOUT_MS = 5000;
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 const CONTINUE = "Continue";
 const OPEN_SETTINGS = "Open Settings";
 const SHOW_OUTPUT = "Show Output";
+const RETRY = "Retry";
 const RESTART_SERVER = "Restart Server";
+const DOWNLOAD_TITLE = "Downloading nullscan server…";
 const ANALYZE_WORKSPACE = "Analyze Workspace";
 const CREATE_CONFIG = "Create";
 
@@ -48,6 +62,7 @@ export async function deactivate(): Promise<void> {
 
 class NullscanExtension implements vscode.Disposable {
   private client: LanguageClient | undefined;
+  private downloadController: AbortController | undefined;
   private disposed = false;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -72,14 +87,8 @@ class NullscanExtension implements vscode.Disposable {
     const settings = readSettings();
     this.statusBar.setVisible(settings.showStatusBar);
 
-    const binary = resolveServerBinary({
-      configuredPath: settings.path,
-      extensionPath: this.context.extensionPath,
-      platform: process.platform,
-      arch: process.arch,
-    });
-    if (!("path" in binary)) {
-      await this.reportMissingBinary(binary);
+    const binary = await this.resolveBinary(settings.path);
+    if (binary === undefined || this.disposed) {
       return;
     }
 
@@ -90,6 +99,218 @@ class NullscanExtension implements vscode.Disposable {
     if (!this.disposed) {
       await this.startClient(binary.path);
     }
+  }
+
+  /**
+   * `nullscan.path` → bundled binary → verified download → `PATH`. The download runs
+   * only when the setting is empty and no bundled binary exists.
+   */
+  private async resolveBinary(
+    configuredPath: string,
+  ): Promise<{ path: string; source: BinarySource } | undefined> {
+    if (configuredPath.trim().length > 0) {
+      const explicit = resolveServerBinary({
+        configuredPath,
+        extensionPath: this.context.extensionPath,
+        platform: process.platform,
+        arch: process.arch,
+        includePath: true,
+      });
+      if ("path" in explicit) {
+        return explicit;
+      }
+      await this.reportMissingBinary(explicit);
+      return undefined;
+    }
+
+    const version = this.extensionVersion();
+    const cached = cachedServerLocation(
+      this.cacheDirectory(),
+      version,
+      process.platform,
+      process.arch,
+    );
+    const local = resolveServerBinary({
+      configuredPath: "",
+      extensionPath: this.context.extensionPath,
+      platform: process.platform,
+      arch: process.arch,
+      downloadedPath: cached?.path,
+      includePath: false,
+    });
+    if ("path" in local) {
+      return local;
+    }
+    if (cached === undefined) {
+      await this.reportMissingBinary(local);
+      return undefined;
+    }
+
+    const download = await this.downloadBinary(version);
+    if ("path" in download) {
+      return { path: download.path, source: "download" };
+    }
+
+    const onPath = this.findOnPath(configuredPath);
+    if (onPath !== undefined) {
+      this.output.appendLine(
+        `Nullscan: falling back to ${onPath.path} (${sourceLabel(onPath.source)}) because the download did not complete.`,
+      );
+      return onPath;
+    }
+    return undefined;
+  }
+
+  private async downloadBinary(
+    version: string,
+  ): Promise<{ path: string } | { cancelled: true } | { failed: true }> {
+    const http = vscode.workspace.getConfiguration("http");
+    let timedOut = false;
+    try {
+      const result = await vscode.window.withProgress<DownloadServerResult>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: DOWNLOAD_TITLE,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const controller = new AbortController();
+          this.downloadController = controller;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, DOWNLOAD_TIMEOUT_MS);
+          const subscription = token.onCancellationRequested(() => controller.abort());
+          try {
+            return await downloadServer({
+              version,
+              cacheDir: this.cacheDirectory(),
+              signal: controller.signal,
+              proxy: http.get<string>("proxy", ""),
+              strictSSL: http.get<boolean>("proxyStrictSSL", true),
+              log: (line) => this.output.appendLine(`Nullscan: ${line}`),
+              onProgress: (downloaded, total) => {
+                const progressMessage =
+                  total > 0
+                    ? `${formatBytes(downloaded)} of ${formatBytes(total)}`
+                    : formatBytes(downloaded);
+                progress.report({ message: progressMessage });
+              },
+            });
+          } finally {
+            clearTimeout(timer);
+            subscription.dispose();
+            this.downloadController = undefined;
+          }
+        },
+      );
+      this.output.appendLine(
+        `Nullscan: server ${result.downloaded ? "downloaded" : "reused from the cache"} at ${result.path}.`,
+      );
+      return { path: result.path };
+    } catch (error) {
+      if (this.disposed) {
+        this.output.appendLine("Nullscan: server download stopped because the extension was disposed.");
+        return { cancelled: true };
+      }
+      if (timedOut) {
+        await this.reportDownloadFailure(
+          new Error(`The download timed out after ${DOWNLOAD_TIMEOUT_MS / 1000} s.`),
+        );
+        return { failed: true };
+      }
+      if (isAbortError(error)) {
+        this.output.appendLine("Nullscan: server download cancelled.");
+        this.statusBar.setUnavailable("Nullscan: the language server download was cancelled.");
+        void vscode.window.showInformationMessage(
+          'Nullscan: server download cancelled. Run "Nullscan: Redownload Server" to try again.',
+        );
+        return { cancelled: true };
+      }
+      await this.reportDownloadFailure(error);
+      return { failed: true };
+    }
+  }
+
+  private findOnPath(
+    configuredPath: string,
+  ): { path: string; source: BinarySource } | undefined {
+    const fallback = resolveServerBinary({
+      configuredPath,
+      extensionPath: this.context.extensionPath,
+      platform: process.platform,
+      arch: process.arch,
+      includePath: true,
+    });
+    if ("path" in fallback) {
+      return fallback;
+    }
+    this.output.appendLine(fallback.error);
+    return undefined;
+  }
+
+  private async reportDownloadFailure(error: unknown): Promise<void> {
+    const message = messageOf(error);
+    this.output.appendLine(`Nullscan: server download failed: ${message}`);
+    this.output.appendLine(
+      "Nullscan: check the http.proxy setting, your network, or set nullscan.path to a local build.",
+    );
+    this.statusBar.setUnavailable(`Nullscan: server download failed. ${firstLine(message)}`);
+
+    const action = await vscode.window.showErrorMessage(
+      `Nullscan: could not download the language server. ${firstLine(message)}`,
+      OPEN_SETTINGS,
+      SHOW_OUTPUT,
+      RETRY,
+    );
+    if (action === OPEN_SETTINGS) {
+      await openNullscanSettings("nullscan.path");
+    } else if (action === SHOW_OUTPUT) {
+      this.output.show();
+    } else if (action === RETRY) {
+      await vscode.commands.executeCommand("nullscan.redownloadServer");
+    }
+  }
+
+  private async redownloadServer(): Promise<void> {
+    const version = this.extensionVersion();
+    const cached = cachedServerLocation(
+      this.cacheDirectory(),
+      version,
+      process.platform,
+      process.arch,
+    );
+    if (cached === undefined) {
+      void vscode.window.showErrorMessage(
+        `Nullscan: this platform (${process.platform}-${process.arch}) has no prebuilt language server. Set "nullscan.path" instead.`,
+      );
+      return;
+    }
+
+    this.output.appendLine(
+      `Nullscan: deleting ${cached.path} and downloading nullscan-lsp ${version}.`,
+    );
+    await this.stop();
+    try {
+      await removeCachedServer(cached);
+    } catch (error) {
+      this.reportError(`could not delete ${cached.path}`, error);
+      return;
+    }
+
+    const download = await this.downloadBinary(version);
+    if (!("path" in download)) {
+      return;
+    }
+    await this.start();
+  }
+
+  private extensionVersion(): string {
+    return String(this.context.extension.packageJSON.version ?? "0.0.0");
+  }
+
+  private cacheDirectory(): string {
+    return this.context.globalStorageUri.fsPath;
   }
 
   async stop(): Promise<void> {
@@ -110,6 +331,7 @@ class NullscanExtension implements vscode.Disposable {
 
   dispose(): void {
     this.disposed = true;
+    this.downloadController?.abort();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
@@ -122,6 +344,7 @@ class NullscanExtension implements vscode.Disposable {
       ["nullscan.analyzeWorkspace", () => this.analyzeWorkspace()],
       ["nullscan.showSummary", () => this.showSummary()],
       ["nullscan.openConfig", () => this.openConfig()],
+      ["nullscan.redownloadServer", () => this.redownloadServer()],
       ["nullscan.restartServer", () => this.restartServer()],
     ];
     return commands.map(([id, run]) => vscode.commands.registerCommand(id, run));
@@ -182,7 +405,7 @@ class NullscanExtension implements vscode.Disposable {
     this.output.appendLine(
       `Nullscan: language server ${actual}, extension ${expected}.`,
     );
-    if (actual === expected) {
+    if (serverVersionMatches(expected, actual)) {
       return;
     }
 
@@ -464,6 +687,8 @@ function sourceLabel(source: BinarySource): string {
       return "nullscan.path";
     case "bundled":
       return "bundled binary";
+    case "download":
+      return "downloaded cache";
     case "path":
       return "PATH";
   }
@@ -471,4 +696,23 @@ function sourceLabel(source: BinarySource): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function firstLine(message: string): string {
+  return message.split("\n")[0] ?? message;
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.name === "AbortError" || /\bcancell?ed\b/i.test(error.message);
+}
+
+function formatBytes(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1) {
+    return `${megabytes.toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }

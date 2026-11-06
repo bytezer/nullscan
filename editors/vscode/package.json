@@ -47,6 +47,11 @@
         "category": "Nullscan"
       },
       {
+        "command": "nullscan.redownloadServer",
+        "title": "Redownload Server",
+        "category": "Nullscan"
+      },
+      {
         "command": "nullscan.restartServer",
         "title": "Restart Server",
         "category": "Nullscan"
@@ -58,7 +63,7 @@
         "nullscan.path": {
           "type": "string",
           "default": "",
-          "description": "Path to the nullscan-lsp executable. When empty, the extension looks for a bundled binary in bin/<platform>-<arch>/ and then on PATH."
+          "description": "Path to the nullscan-lsp executable. When empty, the extension uses a bundled binary in bin/<platform>-<arch>/, otherwise it downloads and verifies the matching release into global storage, and only then falls back to PATH."
         },
         "nullscan.configPath": {
           "type": "string",
@@ -107,6 +112,7 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "https-proxy-agent": "^9.1.0",
     "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {

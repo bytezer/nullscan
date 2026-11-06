@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { posix, win32 } from "node:path";
 
 /** Where a resolved server binary came from. */
-export type BinarySource = "setting" | "bundled" | "path";
+export type BinarySource = "setting" | "bundled" | "download" | "path";
 
 /**
  * `path`/`source` describe a usable binary; `error`/`candidates` describe every location
@@ -23,6 +23,10 @@ export interface ResolveBinaryOptions {
   arch: string;
   /** `process.env.PATH`, injectable for tests. */
   envPath?: string | undefined;
+  /** Cached download for this extension version; takes precedence over `PATH`. */
+  downloadedPath?: string | undefined;
+  /** Set to `false` to skip the `PATH` lookup (used before downloading). */
+  includePath?: boolean;
   /** Existence check, injectable for tests. */
   isExecutable?: (candidate: string) => boolean;
 }
@@ -32,18 +36,26 @@ interface Candidate {
   source: BinarySource;
 }
 
-const PLATFORMS = ["linux", "darwin", "win32"] as const;
-const ARCHITECTURES = ["x64", "arm64"] as const;
+/** Release target triple per `<platform>-<arch>` pair; shared with the downloader. */
+const TRIPLES: Readonly<Record<string, string>> = {
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "darwin-x64": "x86_64-apple-darwin",
+  "darwin-arm64": "aarch64-apple-darwin",
+  "win32-x64": "x86_64-pc-windows-msvc",
+};
 
 /** e.g. `linux-x64`; `undefined` for a combination without a prebuilt server. */
 export function serverTarget(platform: string, arch: string): string | undefined {
-  if (!isPlatform(platform) || !isArch(arch)) {
-    return undefined;
-  }
-  return `${platform}-${arch}`;
+  return serverTriple(platform, arch) === undefined ? undefined : `${platform}-${arch}`;
 }
 
-/** Resolves the server in `nullscan.path` → bundled binary → `PATH` order. */
+/** e.g. `x86_64-unknown-linux-gnu`; `undefined` for an unsupported combination. */
+export function serverTriple(platform: string, arch: string): string | undefined {
+  return TRIPLES[`${platform}-${arch}`];
+}
+
+/** Resolves the server in `nullscan.path` → bundled → downloaded cache → `PATH` order. */
 export function resolveServerBinary(options: ResolveBinaryOptions): ResolveBinaryResult {
   const isExecutable = options.isExecutable ?? isExecutableFile;
   const configuredPath = options.configuredPath.trim();
@@ -76,6 +88,19 @@ export function parseServerVersion(stdout: string): string | undefined {
   )?.[1];
 }
 
+/**
+ * Compares the semver core, so `0.1.0-beta.2` matches `0.1.0` in either direction.
+ * Pre-release tags and build metadata are ignored on purpose: the binary and the
+ * extension ship from the same release tag.
+ */
+export function serverVersionMatches(expected: string, actual: string): boolean {
+  return semverCore(expected) === semverCore(actual);
+}
+
+function semverCore(version: string): string {
+  return version.trim().replace(/^v/, "").split(/[-+]/, 1)[0] ?? version.trim();
+}
+
 /** Default existence check: the candidate must be present and executable. */
 export function isExecutableFile(candidate: string): boolean {
   try {
@@ -86,18 +111,7 @@ export function isExecutableFile(candidate: string): boolean {
   }
 }
 
-function isPlatform(value: string): value is (typeof PLATFORMS)[number] {
-  return (PLATFORMS as readonly string[]).includes(value);
-}
-
-function isArch(value: string): value is (typeof ARCHITECTURES)[number] {
-  return (ARCHITECTURES as readonly string[]).includes(value);
-}
-
-function candidatePaths(
-  options: ResolveBinaryOptions,
-  target: string,
-): Candidate[] {
+function candidatePaths(options: ResolveBinaryOptions, target: string): Candidate[] {
   const pathApi = options.platform === "win32" ? win32 : posix;
   const binaryName = options.platform === "win32" ? "nullscan-lsp.exe" : "nullscan-lsp";
   const candidates: Candidate[] = [];
@@ -110,6 +124,12 @@ function candidatePaths(
     path: pathApi.join(options.extensionPath, "bin", target, binaryName),
     source: "bundled",
   });
+  if (options.downloadedPath !== undefined) {
+    candidates.push({ path: options.downloadedPath, source: "download" });
+  }
+  if (options.includePath === false) {
+    return candidates;
+  }
   for (const directory of pathEntries(options.platform, options.envPath)) {
     candidates.push({ path: pathApi.join(directory, binaryName), source: "path" });
   }
@@ -129,7 +149,7 @@ function missingBinaryMessage(candidates: Candidate[]): string {
   const lines = [
     "Cannot find the nullscan-lsp language server. Checked:",
     ...candidates.map((candidate) => `  - ${candidate.path} (${sourceLabel(candidate.source)})`),
-    'Set "nullscan.path" to an existing nullscan-lsp executable or install nullscan.',
+    'Set "nullscan.path" to an existing nullscan-lsp executable, or run "Nullscan: Redownload Server".',
   ];
   return lines.join("\n");
 }
@@ -148,6 +168,8 @@ function sourceLabel(source: BinarySource): string {
       return "nullscan.path";
     case "bundled":
       return "bundled";
+    case "download":
+      return "downloaded";
     case "path":
       return "PATH";
   }

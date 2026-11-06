@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with
 pre-release versions such as `0.x.0-beta.1` for testers.
 
+## [0.1.0-beta.2] - 2026-11-06
+
+Tester feedback round: finer control over what is analyzed, without editing rule code.
+
+### Added
+
+- **Path ignores in `nullscan.toml`** — `[files].ignore` removes files from every pass
+  (rules and duplicates) and `[duplicates].ignore` keeps them analyzed but out of clone
+  detection, which is what fixtures and mocks need. Patterns support `*`, `?`, `**`, a
+  trailing `/` for a subtree, segment matching without a slash, and absolute paths;
+  they are relative to the config file's directory.
+- **Inline suppressions** — `// nullscan-ignore-next-line [rules]`,
+  `// nullscan-ignore-line [rules]` and their `/* */` forms. Only real comments count;
+  no rule list suppresses every rule.
+- **`Suppress <rule> on the next line` quick fix** in the VS Code extension, next to the
+  existing disable-rule action.
+- **`nullscan --version`** for the CLI.
+
+### Changed
+
+- Files excluded by `[files].ignore` publish no diagnostics when opened in the editor.
+
 ## [0.1.0] - 2026-11-06
 
 First tagged release: the TypeScript analyzer ships as a CLI and as a VS Code extension

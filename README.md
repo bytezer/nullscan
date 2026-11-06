@@ -87,8 +87,8 @@ download of the same release, or `PATH`; the download is checked against the rel
 ## Configuration
 
 Drop a `nullscan.toml` next to where you run the CLI (or point at one with
-`--config path/to/file.toml`) to disable rules or override thresholds. Everything is
-optional; anything omitted keeps its built-in default:
+`--config path/to/file.toml`) to disable rules, override thresholds or exclude paths.
+Everything is optional; anything omitted keeps its built-in default:
 
 ```toml
 [rules]
@@ -101,11 +101,49 @@ duplicate-string-threshold = 3   # default: 3
 duplicate-string-min-length = 10 # default: 10
 max-switch-cases = 10            # default: 10
 no-small-switch-min-cases = 3    # default: 3
+
+# Excluded from every analysis (file rules and duplicate detection).
+[files]
+ignore = ["tests/**", "**/*.test.ts", "src/generated/**"]
+
+# Still analyzed for rules, but excluded from clone detection.
+[duplicates]
+ignore = ["tests/mocks/**", "**/__fixtures__/**"]
 ```
 
 An unknown name in `disabled` prints a warning (likely a typo) but doesn't fail the
 run. Disabling `duplicate-code` skips that pass entirely rather than just hiding its
 output, since it's the most expensive rule to compute.
+
+Ignore patterns are relative to the directory that contains `nullscan.toml` (or the
+working directory when there is no config file). `*` and `?` stay inside one path
+segment, `**` spans any number of segments, a trailing `/` covers the whole subtree, and
+a pattern without `/` matches any segment, so `tests` covers both `tests/` and
+`src/tests/`. `[files].ignore` removes files from the run entirely; `[duplicates].ignore`
+keeps them analyzed but out of clone detection, which is what fixtures and mocks need.
+
+## Suppressing findings
+
+Inline comments suppress file-scoped diagnostics without touching the shared config:
+
+```ts
+// nullscan-ignore-next-line
+console.log("suppresses every rule on the next line");
+
+// nullscan-ignore-next-line no-console, eqeqeq
+console.log(a == b);
+
+eval(source); // nullscan-ignore-line no-eval
+
+/* nullscan-ignore-next-line */
+debugger;
+```
+
+Only real comments count: a marker inside a string, template literal or JSX text does
+nothing. A marker without a rule list suppresses every rule; a list suppresses only the
+named ones. In the editor, the `Suppress <rule> on the next line` quick fix inserts the
+comment for you. Suppressions apply to per-file rules; `duplicate-code` is controlled with
+`[duplicates].ignore`.
 
 ## Implemented rules
 

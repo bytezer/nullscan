@@ -2,7 +2,7 @@
   "name": "nullscan",
   "displayName": "Nullscan",
   "description": "TypeScript static analysis powered by the nullscan language server.",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "publisher": "bytezer",
   "license": "GPL-3.0-only",
   "repository": {

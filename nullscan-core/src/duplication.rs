@@ -2,6 +2,10 @@
 //! (ignoring comments), hash sliding windows of tokens, and for every pair of files
 //! that share a window, extend the match to its true maximal length so one real
 //! duplicate is reported once instead of once per overlapping sub-window.
+//!
+//! By default presentational JSX markup is ignored (see [`DuplicateOptions`]): static
+//! markup and SVG icons never make two components look like clones, while the logic
+//! inside `{...}` expressions still does.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -33,7 +37,19 @@ struct FileTokens {
     tokens: Vec<Token>,
 }
 
-pub fn find_duplicates(files: &[(PathBuf, Language, String)], min_tokens: usize) -> Vec<Duplicate> {
+pub struct DuplicateOptions {
+    /// Minimum number of consecutive tokens a clone must share.
+    pub min_tokens: usize,
+    /// Count JSX markup (tags, attributes, text) as tokens. Off by default so only the
+    /// logic inside `{...}` expressions is compared.
+    pub compare_markup: bool,
+}
+
+pub fn find_duplicates(
+    files: &[(PathBuf, Language, String)],
+    options: DuplicateOptions,
+) -> Vec<Duplicate> {
+    let min_tokens = options.min_tokens;
     // Parsing dominates the cost here, so it's done in parallel (each call builds its
     // own `Parser`, which isn't shareable across concurrent calls).
     let file_tokens: Vec<FileTokens> = files
@@ -42,7 +58,7 @@ pub fn find_duplicates(files: &[(PathBuf, Language, String)], min_tokens: usize)
             let tree = language.parse(source)?;
             Some(FileTokens {
                 path: path.clone(),
-                tokens: tokenize(&tree, source),
+                tokens: tokenize(&tree, source, options.compare_markup),
             })
         })
         .collect();
@@ -137,29 +153,102 @@ fn build_windows(files: &[FileTokens], min_tokens: usize) -> HashMap<String, Vec
     buckets
 }
 
-fn tokenize(tree: &Tree, source: &str) -> Vec<Token> {
+fn tokenize(tree: &Tree, source: &str, compare_markup: bool) -> Vec<Token> {
     let mut out = Vec::new();
-    collect_leaves(tree.root_node(), source, &mut out);
+    collect_leaves(tree.root_node(), source, compare_markup, &mut out);
     out
 }
 
-fn collect_leaves(node: Node, source: &str, out: &mut Vec<Token>) {
+fn collect_leaves(node: Node, source: &str, compare_markup: bool, out: &mut Vec<Token>) {
     if node.child_count() == 0 {
-        if node.kind() != "comment" {
-            if let Ok(text) = node.utf8_text(source.as_bytes()) {
-                if !text.trim().is_empty() {
-                    out.push(Token {
-                        text: text.to_string(),
-                        line: node.start_position().row + 1,
-                    });
-                }
-            }
-        }
+        push_leaf(node, source, compare_markup, out);
         return;
     }
+    if !compare_markup && is_skipped_markup(node, source) {
+        collect_expression_leaves(node, source, out);
+        return;
+    }
+    let children = children_of(node);
+    for child in children {
+        collect_leaves(child, source, compare_markup, out);
+    }
+}
+
+fn push_leaf(node: Node, source: &str, compare_markup: bool, out: &mut Vec<Token>) {
+    if node.kind() == "comment" || (!compare_markup && node.kind() == "jsx_text") {
+        return;
+    }
+    let Ok(text) = node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    out.push(Token {
+        text: text.to_string(),
+        line: node.start_position().row + 1,
+    });
+}
+
+fn children_of(node: Node) -> Vec<Node> {
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_leaves(child, source, out);
+    node.children(&mut cursor).collect()
+}
+
+/// Whether this markup subtree contributes nothing but the logic inside its `{...}`
+/// expressions while markup is being ignored: SVG icons and purely static markup.
+fn is_skipped_markup(node: Node, source: &str) -> bool {
+    match node.kind() {
+        "jsx_element" | "jsx_self_closing_element" | "jsx_fragment" => {
+            is_svg_element(node, source) || !has_jsx_expression(node)
+        }
+        _ => false,
+    }
+}
+
+/// Exact, case-sensitive `svg` tag name, either `<svg>` or `<svg />`.
+fn is_svg_element(node: Node, source: &str) -> bool {
+    let name = match node.kind() {
+        "jsx_element" => node
+            .child_by_field_name("open_tag")
+            .and_then(|opening| opening.child_by_field_name("name")),
+        "jsx_self_closing_element" => node.child_by_field_name("name"),
+        _ => None,
+    };
+    match name {
+        Some(name) if name.kind() == "identifier" => {
+            name.utf8_text(source.as_bytes()).is_ok_and(|text| text == "svg")
+        }
+        _ => false,
+    }
+}
+
+fn has_jsx_expression(node: Node) -> bool {
+    children_of(node)
+        .into_iter()
+        .any(|child| child.kind() == "jsx_expression" || has_jsx_expression(child))
+}
+
+/// Walks a skipped markup subtree without tokenizing any of its markup, so only the
+/// contents of `{...}` expressions survive. Nested markup is not visited twice: it is
+/// either ignored the same way or, when it carries the compared logic itself, handed
+/// back to the normal collector.
+fn collect_expression_leaves(node: Node, source: &str, out: &mut Vec<Token>) {
+    if node.child_count() == 0 {
+        return;
+    }
+    for child in children_of(node) {
+        match child.kind() {
+            "jsx_expression" => collect_leaves(child, source, false, out),
+            "jsx_element" | "jsx_self_closing_element" | "jsx_fragment" => {
+                if is_skipped_markup(child, source) {
+                    collect_expression_leaves(child, source, out);
+                } else {
+                    collect_leaves(child, source, false, out);
+                }
+            }
+            _ => collect_expression_leaves(child, source, out),
+        }
     }
 }
 
@@ -172,6 +261,27 @@ mod tests {
             .iter()
             .map(|(name, src)| (PathBuf::from(name), Language::TypeScript, src.to_string()))
             .collect()
+    }
+
+    fn tsx_files(pairs: &[(&str, &str)]) -> Vec<(PathBuf, Language, String)> {
+        pairs
+            .iter()
+            .map(|(name, src)| (PathBuf::from(name), Language::Tsx, src.to_string()))
+            .collect()
+    }
+
+    fn options(min_tokens: usize) -> DuplicateOptions {
+        DuplicateOptions {
+            min_tokens,
+            compare_markup: false,
+        }
+    }
+
+    fn options_with_markup(min_tokens: usize) -> DuplicateOptions {
+        DuplicateOptions {
+            min_tokens,
+            compare_markup: true,
+        }
     }
 
     /// 40 distinct statements so the block is well over the 30-token threshold used below.
@@ -187,7 +297,7 @@ mod tests {
         let block = big_block("call");
         let a = format!("function a() {{\n{block}\n}}");
         let b = format!("function b() {{\n{block}\n}}");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), 30);
+        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
         assert_eq!(dups.len(), 1);
         assert!(dups[0].token_count >= 30);
     }
@@ -196,7 +306,7 @@ mod tests {
     fn does_not_flag_distinct_files() {
         let a = big_block("call");
         let b = big_block("other");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), 30);
+        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
         assert!(dups.is_empty());
     }
 
@@ -207,7 +317,7 @@ mod tests {
         let block = big_block("step");
         let a = format!("function a() {{\n{block}\n}}");
         let b = format!("function b() {{\n{block}\n}}");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), 30);
+        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
         assert_eq!(dups.len(), 1);
     }
 
@@ -215,7 +325,7 @@ mod tests {
     fn short_snippets_are_ignored() {
         let a = "const x = 1;\nconst y = 2;";
         let b = "const x = 1;\nconst y = 2;";
-        let dups = find_duplicates(&files(&[("a.ts", a), ("b.ts", b)]), 30);
+        let dups = find_duplicates(&files(&[("a.ts", a), ("b.ts", b)]), options(30));
         assert!(dups.is_empty());
     }
 
@@ -223,7 +333,72 @@ mod tests {
     fn does_not_flag_overlapping_windows_within_the_same_block() {
         // A single big block should never be reported as a duplicate of itself.
         let a = big_block("x");
-        let dups = find_duplicates(&files(&[("a.ts", &a)]), 30);
+        let dups = find_duplicates(&files(&[("a.ts", &a)]), options(30));
         assert!(dups.is_empty());
+    }
+
+    /// An inline SVG icon with well over 30 markup tokens; only `d` differs per file.
+    fn svg_icon(path_d: &str) -> String {
+        format!(
+            "const icon = <svg width=\"800px\" height=\"800px\" viewBox=\"0 0 32 32\" \
+             id=\"svg5\" version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" \
+             fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\">\
+             <path d=\"{path_d}\"/><path d=\"M2 2\"/><path d=\"M3 3\"/></svg>;"
+        )
+    }
+
+    #[test]
+    fn svg_markup_is_ignored_by_default() {
+        let a = svg_icon("M1 1");
+        let b = svg_icon("M9 9");
+        let pair = tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]);
+        let without_markup = find_duplicates(&pair, options(30));
+        assert!(without_markup.is_empty());
+
+        let with_markup = find_duplicates(&pair, options_with_markup(30));
+        assert!(!with_markup.is_empty());
+    }
+
+    #[test]
+    fn svg_expressions_do_not_look_like_markup_duplicates() {
+        // Both icons carry the same `{color}` expression, but that is only three tokens.
+        let a = svg_icon("M1 1").replace("><path", ">{color}<path");
+        let b = svg_icon("M9 9").replace("><path", ">{color}<path");
+        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
+        assert!(dups.is_empty());
+    }
+
+    #[test]
+    fn static_jsx_markup_is_ignored_by_default() {
+        let src = "const view = <div className=\"card\"><h2 className=\"title\">Title</h2>\
+                   <p className=\"body\">Some body text here</p>\
+                   <button className=\"cta\">Click me now</button>\
+                   <span className=\"hint\">Hint text</span></div>;";
+        let pair = tsx_files(&[("a.tsx", src), ("b.tsx", src)]);
+        assert!(find_duplicates(&pair, options(30)).is_empty());
+        assert!(!find_duplicates(&pair, options_with_markup(30)).is_empty());
+    }
+
+    #[test]
+    fn duplicated_logic_inside_jsx_expressions_is_flagged() {
+        let logic = "items.filter((item) => item.active)\
+                     .map((item) => render(item, { key: item.id, label: item.name }))";
+        let a = format!("const a = <section className=\"alpha\">{{{logic}}}</section>;");
+        let b = format!("const b = <article data-role=\"beta\">{{{logic}}}</article>;");
+        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
+        assert!(!dups.is_empty());
+    }
+
+    #[test]
+    fn jsx_text_does_not_create_duplicates() {
+        let text = "lorem ipsum dolor sit amet ".repeat(12);
+        let a = format!("const first = <p className=\"alpha\">{{value}}{text}</p>;");
+        let b = format!("const second = <section className=\"beta\">{{value}}{text}</section>;");
+        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(10));
+        assert!(dups.is_empty());
+
+        let tree = Language::Tsx.parse(&a).expect("parse");
+        let tokens = tokenize(&tree, &a, false);
+        assert!(!tokens.iter().any(|token| token.text.starts_with("lorem")));
     }
 }

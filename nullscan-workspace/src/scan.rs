@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use nullscan_core::{
-    Config, Diagnostic, Duplicate, Language, analyze, find_duplicates,
+    Config, Diagnostic, Duplicate, DuplicateOptions, Language, analyze, find_duplicates,
 };
 use rayon::prelude::*;
 
@@ -244,7 +244,13 @@ fn find_duplicates_if_enabled(
         .filter(|file| !is_ignored(ignore, &file.file))
         .map(|file| (file.file.clone(), file.language, file.source.clone()))
         .collect();
-    find_duplicates(&sources, config.duplicate_code_min_tokens)
+    find_duplicates(
+        &sources,
+        DuplicateOptions {
+            min_tokens: config.duplicate_code_min_tokens,
+            compare_markup: config.duplicates_compare_markup,
+        },
+    )
 }
 
 fn is_ignored(ignore: Option<&PathFilter>, path: &Path) -> bool {

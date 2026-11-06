@@ -7,6 +7,9 @@ pub struct Config {
     pub disabled_rules: HashSet<String>,
     pub cognitive_complexity_threshold: u32,
     pub duplicate_code_min_tokens: usize,
+    /// Whether clone detection compares presentational JSX markup. Off by default, so
+    /// only the logic inside `{...}` expressions counts and static markup is ignored.
+    pub duplicates_compare_markup: bool,
     pub duplicate_string_threshold: usize,
     pub duplicate_string_min_length: usize,
     /// Maximum number of non-default `case` clauses allowed before `max-switch-cases`.
@@ -21,6 +24,7 @@ impl Default for Config {
             disabled_rules: HashSet::new(),
             cognitive_complexity_threshold: 15,
             duplicate_code_min_tokens: 30,
+            duplicates_compare_markup: false,
             duplicate_string_threshold: 3,
             duplicate_string_min_length: 10,
             max_switch_cases: 10,

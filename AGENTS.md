@@ -14,6 +14,20 @@ cargo run -p nullscan-cli -- src/ --config path/to/nullscan.toml
 
 There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test --workspace` is the verification step. Edition 2024 requires a recent toolchain (tested on 1.98).
 
+## Commits
+
+- Use Conventional Commits: `type(scope): summary`, with types `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
+- Scope names the affected area, for example `feat(rules): add no-eval` or `fix(cli): keep output order deterministic`.
+- Summary: English, imperative, lowercase after the colon, <= 72 chars, no trailing period. Body explains why, wrapped at 72.
+- One logical change per commit; keep refactors separate from behavior changes. Land a rule together with its fixture pair and its `RULES.md` row in a single commit.
+- Commits before this convention use a free-form style; do not rewrite history.
+
+## Code style
+
+- All identifiers, comments, doc comments, log/error messages and test names are in English.
+- Keep functions atomic: one job, roughly <= 40 lines, <= 4 parameters, nesting <= 3. Extract helpers rather than growing `run()` functions.
+- Group code by domain: one module per rule under `lang/typescript/rules/`, and shared helpers in the module that owns them (`rule.rs`, `scope.rs`, `control_flow.rs`) instead of a generic `utils` module.
+
 ## Layout and flow
 
 - `nullscan-core/` — tree-sitter parsing, the rule registry, per-file rules, cognitive complexity, cross-file duplication. No `serde` in this crate; `Config` is a plain struct.

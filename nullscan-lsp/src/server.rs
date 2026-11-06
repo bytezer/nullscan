@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,14 +16,17 @@ use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
-    CancelParams, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, HoverParams, InitializeParams, MessageType, NumberOrString, Uri,
+    CancelParams, CodeActionOrCommand, CodeActionParams, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, HoverParams, InitializeParams, MessageType, NumberOrString,
+    Range, Uri,
     notification::{
         Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
-        DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _,
+        DidChangeWorkspaceFolders, DidCloseTextDocument, DidOpenTextDocument,
+        DidSaveTextDocument, Notification as _,
     },
-    request::{HoverRequest, Request as _},
+    request::{CodeActionRequest, HoverRequest, Request as _},
 };
 use nullscan_core::{Config, Language, analyze};
 use nullscan_workspace::config::load_in_dir;
@@ -30,6 +34,8 @@ use nullscan_workspace::json::summary_json;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use crate::code_action;
+use crate::config_edit::add_disabled_rule;
 use crate::convert;
 use crate::debounce::Debouncer;
 use crate::hover;
@@ -168,6 +174,11 @@ impl Server {
                     self.did_change_watched_files(params);
                 }
             }
+            DidChangeWorkspaceFolders::METHOD => {
+                if let Some(params) = params_of::<DidChangeWorkspaceFolders>(notification) {
+                    self.did_change_workspace_folders(params);
+                }
+            }
             Cancel::METHOD => {
                 if let Some(params) = params_of::<Cancel>(notification) {
                     self.cancel_request(params);
@@ -184,6 +195,7 @@ impl Server {
             requests::ANALYZE_WORKSPACE_METHOD => self.analyze_workspace(request),
             requests::SUMMARY_METHOD => self.summary_response(request),
             HoverRequest::METHOD => self.hover_request(request),
+            CodeActionRequest::METHOD => self.code_action_request(request),
             _ => return false,
         }
         true
@@ -300,6 +312,24 @@ impl Server {
         }
         log::debug!("ignoring watched file {}", path.display());
         false
+    }
+
+    /// Tracks multi-root changes so later scans use the current folder set.
+    fn did_change_workspace_folders(&mut self, params: DidChangeWorkspaceFoldersParams) {
+        for removed in params.event.removed {
+            if let Some(path) = to_file_path(&removed.uri) {
+                self.folders.retain(|folder| folder != &path);
+            }
+        }
+        for added in params.event.added {
+            if let Some(path) = to_file_path(&added.uri) {
+                if !self.folders.contains(&path) {
+                    self.folders.push(path);
+                }
+            }
+        }
+        self.summary_stale = true;
+        log::info!("workspace folders updated: {} folder(s)", self.folders.len());
     }
 
     /// Applies one debounced analyze-on-type fire.
@@ -562,6 +592,90 @@ impl Server {
         self.reply_ok(id, result);
     }
 
+    /// Answers `textDocument/codeAction` with one disable-rule quick fix per rule.
+    fn code_action_request(&mut self, request: &Request) {
+        let id = request.id.clone();
+        let params: CodeActionParams = match serde_json::from_value(request.params.clone()) {
+            Ok(params) => params,
+            Err(error) => {
+                let message = format!("invalid params: {error}");
+                return self.reply_error(id, ErrorCode::InvalidParams, message);
+            }
+        };
+        let actions = self.code_actions(params);
+        let result = serde_json::to_value(actions).unwrap_or(Value::Null);
+        self.reply_ok(id, result);
+    }
+
+    /// The client's own diagnostics win; a cursor-only request falls back to the
+    /// diagnostics published for that URI and intersecting its range.
+    fn code_actions(&self, params: CodeActionParams) -> Vec<CodeActionOrCommand> {
+        let uri = params.text_document.uri;
+        let diagnostics = if params.context.diagnostics.is_empty() {
+            self.published_in_range(&uri, params.range)
+        } else {
+            params.context.diagnostics
+        };
+        code_action::rule_hits(&diagnostics)
+            .into_iter()
+            .filter_map(|hit| self.disable_rule_action(&uri, &hit))
+            .collect()
+    }
+
+    fn published_in_range(&self, uri: &Uri, range: Range) -> Vec<lsp_types::Diagnostic> {
+        let Some(published) = self.published.get(uri) else {
+            return Vec::new();
+        };
+        let diagnostics = published.combined();
+        code_action::diagnostics_in_range(&diagnostics, range)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Builds the quick fix that appends `hit.rule` to the config's disabled list.
+    ///
+    /// A config that cannot be edited (broken TOML or a wrong `rules` type) yields no
+    /// action and one warning in the client's output channel.
+    fn disable_rule_action(
+        &self,
+        document: &Uri,
+        hit: &code_action::RuleHit<'_>,
+    ) -> Option<CodeActionOrCommand> {
+        let config = self.config_document(document)?;
+        let new_text = match add_disabled_rule(&config.text, hit.rule) {
+            Ok(new_text) => new_text,
+            Err(error) => {
+                let message = format!("nullscan config: {error}");
+                log_message(&self.sink, MessageType::WARNING, &message);
+                return None;
+            }
+        };
+        Some(code_action::disable_rule_action(hit, &config, new_text).into())
+    }
+
+    /// The config file that governs `document`, with its buffer or disk text.
+    ///
+    /// The target is the nearest workspace folder's `nullscan.toml`; without a workspace
+    /// folder it is the document's own directory.
+    fn config_document(&self, document: &Uri) -> Option<code_action::ConfigDocument> {
+        let path = to_file_path(document)?;
+        let target = config_path(self.config_dir(&path)?);
+        let uri = from_file_path(&target);
+        let open = self.documents.get(&uri);
+        let exists = open.is_some() || target.is_file();
+        let text = match open {
+            Some(document) => document.text.clone(),
+            None => config_text(&target)?,
+        };
+        Some(code_action::ConfigDocument {
+            uri,
+            text,
+            version: open.map(|document| document.version),
+            exists,
+        })
+    }
+
     /// Publishes both groups in one notification and remembers them for the next edit.
     fn publish(&mut self, uri: &Uri, published: Published, version: Option<i32>) {
         self.send(uri, &published, version);
@@ -638,6 +752,35 @@ fn params_of<N: lsp_types::notification::Notification>(
 fn language_for(uri: &Uri) -> Option<Language> {
     let path = to_file_path(uri)?;
     Language::from_path(&path)
+}
+
+/// The file `load_in_dir` resolved for `folder`, else the folder's default config path.
+///
+/// A broken config still resolves to its own file, so the quick fix reports the parse
+/// error instead of silently writing a second `nullscan.toml`.
+fn config_path(folder: &Path) -> PathBuf {
+    match load_in_dir(folder) {
+        Ok(loaded) => loaded
+            .path
+            .unwrap_or_else(|| folder.join(CONFIG_FILE_NAME)),
+        Err(error) => {
+            log::warn!("nullscan config: {error}");
+            folder.join(CONFIG_FILE_NAME)
+        }
+    }
+}
+
+/// The config text on disk: a missing file is empty, an unreadable one is skipped so the
+/// quick fix never replaces content it could not see.
+fn config_text(path: &Path) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
+        Err(error) => {
+            log::warn!("could not read {}: {error}", path.display());
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -863,7 +1006,7 @@ mod tests {
     fn unknown_requests_are_left_to_the_dispatch_loop() {
         let (mut server, _messages) = server();
 
-        assert!(!server.handle_request(&request(9, "textDocument/codeAction", json!({}))));
+        assert!(!server.handle_request(&request(9, "textDocument/definition", json!({}))));
     }
 
     #[test]

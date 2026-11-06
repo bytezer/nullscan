@@ -3,6 +3,8 @@
 //! stdout is reserved for the JSON-RPC channel; every log line goes to stderr. Argument
 //! parsing is hand-written so this binary never pulls in the CLI's `clap` stack.
 
+mod code_action;
+mod config_edit;
 mod convert;
 mod debounce;
 mod hover;
@@ -18,9 +20,11 @@ use std::sync::Arc;
 
 use lsp_server::{Connection, ErrorCode, Message, Request, Response};
 use lsp_types::{
-    HoverProviderCapability, InitializeParams, InitializeResult, PositionEncodingKind, SaveOptions,
+    CodeActionKind, CodeActionOptions, CodeActionProviderCapability, HoverProviderCapability,
+    InitializeParams, InitializeResult, OneOf, PositionEncodingKind, SaveOptions,
     ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 
 use messages::MessageSink;
@@ -185,6 +189,20 @@ fn server_capabilities() -> ServerCapabilities {
         )),
         position_encoding: Some(PositionEncodingKind::UTF16),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+            resolve_provider: Some(false),
+            ..CodeActionOptions::default()
+        })),
+        // Multi-root workspaces: accept the initial folders and later
+        // `workspace/didChangeWorkspaceFolders` notifications.
+        workspace: Some(WorkspaceServerCapabilities {
+            workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                supported: Some(true),
+                change_notifications: Some(OneOf::Left(true)),
+            }),
+            file_operations: None,
+        }),
         ..ServerCapabilities::default()
     }
 }

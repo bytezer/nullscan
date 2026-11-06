@@ -28,7 +28,7 @@ use lsp_types::{
     },
     request::{CodeActionRequest, HoverRequest, Request as _},
 };
-use nullscan_core::{Config, Language, analyze};
+use nullscan_core::{Language, analyze};
 use nullscan_workspace::config;
 use nullscan_workspace::json::summary_json;
 use serde::de::DeserializeOwned;
@@ -539,35 +539,49 @@ impl Server {
     }
 
     /// Analyzes one buffer; unsupported documents publish an empty file group.
+    ///
+    /// A document the active `[files].ignore` filter matches publishes nothing, exactly
+    /// like the workspace scan skipping it.
     fn analyze_document(&self, uri: &Uri, text: &str) -> Vec<lsp_types::Diagnostic> {
         let Some(language) = language_for(uri) else {
             log::debug!("skipping unsupported document {}", uri.as_str());
             return Vec::new();
         };
-        let config = self.config_for(uri);
-        analyze(text, language, &config)
+        let loaded = self.config_for(uri);
+        if let Some(path) = to_file_path(uri) {
+            if loaded.ignore.matches(&path) {
+                log::debug!("skipping ignored document {}", path.display());
+                return Vec::new();
+            }
+        }
+        analyze(text, language, &loaded.config)
             .iter()
             .map(|diagnostic| convert::to_lsp_diagnostic(text, diagnostic))
             .collect()
     }
 
-    /// The explicit `--config` file when set, else the nearest workspace folder's
-    /// `nullscan.toml`; both fall back to the built-in defaults.
-    fn config_for(&self, uri: &Uri) -> Config {
+    /// The config that governs `uri`: the explicit `--config` file when set, else the
+    /// nearest workspace folder's `nullscan.toml`; both fall back to the built-in defaults.
+    fn config_for(&self, uri: &Uri) -> config::LoadedConfig {
         if let Some(path) = &self.config_path {
-            return self.load_config(|| config::load(Some(path)));
+            let root = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            return self.load_config(root, || config::load(Some(path)));
         }
         let Some(path) = to_file_path(uri) else {
-            return Config::default();
+            return default_config();
         };
         let Some(dir) = self.config_dir(&path) else {
-            return Config::default();
+            return default_config();
         };
-        self.load_config(|| config::load_in_dir(dir))
+        self.load_config(dir, || config::load_in_dir(dir))
     }
 
-    /// Runs a loader, forwarding its warnings and turning an error into an empty config.
-    fn load_config<F>(&self, load: F) -> Config
+    /// Runs a loader, forwarding its warnings and turning an error into default settings
+    /// rooted at `root`.
+    fn load_config<F>(&self, root: &Path, load: F) -> config::LoadedConfig
     where
         F: FnOnce() -> Result<config::LoadedConfig, String>,
     {
@@ -576,7 +590,7 @@ impl Server {
                 for warning in &loaded.warnings {
                     log::warn!("{warning}");
                 }
-                loaded.config
+                loaded
             }
             Err(error) => {
                 log_message(
@@ -584,7 +598,7 @@ impl Server {
                     MessageType::WARNING,
                     &format!("nullscan config: {error}"),
                 );
-                Config::default()
+                config::defaults_in(root)
             }
         }
     }
@@ -624,7 +638,7 @@ impl Server {
         self.reply_ok(id, result);
     }
 
-    /// Answers `textDocument/codeAction` with one disable-rule quick fix per rule.
+    /// Answers `textDocument/codeAction` with a disable and a suppress quick fix per rule.
     fn code_action_request(&mut self, request: &Request) {
         let id = request.id.clone();
         let params: CodeActionParams = match serde_json::from_value(request.params.clone()) {
@@ -641,6 +655,9 @@ impl Server {
 
     /// The client's own diagnostics win; a cursor-only request falls back to the
     /// diagnostics published for that URI and intersecting its range.
+    ///
+    /// Each distinct rule yields a "disable in `nullscan.toml`" action and, when the source
+    /// allows it, a "suppress on the next line" action, in that order.
     fn code_actions(&self, params: CodeActionParams) -> Vec<CodeActionOrCommand> {
         let uri = params.text_document.uri;
         let diagnostics = if params.context.diagnostics.is_empty() {
@@ -648,10 +665,16 @@ impl Server {
         } else {
             params.context.diagnostics
         };
-        code_action::rule_hits(&diagnostics)
-            .into_iter()
-            .filter_map(|hit| self.disable_rule_action(&uri, &hit))
-            .collect()
+        let mut actions = Vec::new();
+        for hit in code_action::rule_hits(&diagnostics) {
+            if let Some(action) = self.disable_rule_action(&uri, &hit) {
+                actions.push(action);
+            }
+            if let Some(action) = self.suppress_rule_action(&uri, &hit) {
+                actions.push(action);
+            }
+        }
+        actions
     }
 
     fn published_in_range(&self, uri: &Uri, range: Range) -> Vec<lsp_types::Diagnostic> {
@@ -684,6 +707,29 @@ impl Server {
             }
         };
         Some(code_action::disable_rule_action(hit, &config, new_text).into())
+    }
+
+    /// Builds the quick fix that adds an inline suppression above the diagnostic.
+    ///
+    /// The open buffer is the source when there is one; a file that was only scanned is
+    /// read from disk, and an unreadable file yields no action. The source lines decide
+    /// whether the previous line already suppresses the rule, so nothing is offered then.
+    fn suppress_rule_action(
+        &self,
+        document: &Uri,
+        hit: &code_action::RuleHit<'_>,
+    ) -> Option<CodeActionOrCommand> {
+        let open = self.documents.get(document);
+        let text = match open {
+            Some(open) => open.text.clone(),
+            None => fs::read_to_string(to_file_path(document)?).ok()?,
+        };
+        let target = code_action::TargetDocument {
+            uri: document,
+            text: &text,
+            version: open.map(|open| open.version),
+        };
+        code_action::suppress_action(hit, &target).map(Into::into)
     }
 
     /// The config file that governs `document`, with its buffer or disk text.
@@ -803,6 +849,15 @@ fn config_path(folder: &Path) -> PathBuf {
             folder.join(CONFIG_FILE_NAME)
         }
     }
+}
+
+/// Built-in defaults rooted at the process working directory.
+///
+/// Used when a document has no file path or no containing folder, so there is nothing to
+/// resolve a `nullscan.toml` against.
+fn default_config() -> config::LoadedConfig {
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    config::defaults_in(&root)
 }
 
 /// The config text on disk: a missing file is empty, an unreadable one is skipped so the

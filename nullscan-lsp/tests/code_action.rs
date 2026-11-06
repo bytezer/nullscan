@@ -1,4 +1,4 @@
-//! Disable-rule quick fixes: one action per rule, editing `nullscan.toml` in place.
+//! Quick fixes: disable a rule in `nullscan.toml` or suppress it inline.
 
 mod common;
 
@@ -25,6 +25,14 @@ fn code_action(
         }
     }));
     client.response(id)["result"].clone()
+}
+
+/// The action with `title`, or a panic listing what was offered instead.
+fn action_titled<'a>(actions: &'a [Value], title: &str) -> &'a Value {
+    actions
+        .iter()
+        .find(|action| action["title"] == title)
+        .unwrap_or_else(|| panic!("action {title} missing from {actions:?}"))
 }
 
 /// The `documentChanges` operations of one action.
@@ -74,13 +82,17 @@ fn the_quick_fix_appends_the_rule_to_an_existing_config() {
 
     let actions = code_action(client, 2, &uri, range, diagnostics);
     let actions = actions.as_array().expect("code action array");
-    assert_eq!(actions.len(), 1, "actions: {actions:?}");
+    assert_eq!(actions.len(), 2, "actions: {actions:?}");
 
-    let action = &actions[0];
-    assert_eq!(action["title"], "Disable no-console in nullscan.toml");
+    let action = action_titled(actions, "Disable no-console in nullscan.toml");
     assert_eq!(action["kind"], "quickfix");
     assert_eq!(action["isPreferred"], false);
     assert_eq!(action["diagnostics"][0]["code"], "no-console");
+
+    let suppress = action_titled(actions, "Suppress no-console on the next line");
+    assert_eq!(suppress["kind"], "quickfix");
+    assert_eq!(suppress["isPreferred"], false);
+    assert_eq!(suppress["diagnostics"][0]["code"], "no-console");
 
     assert_eq!(
         operations(action).len(),
@@ -120,7 +132,8 @@ fn a_missing_config_is_created_by_the_edit() {
     let range = diagnostics[0]["range"].clone();
 
     let actions = code_action(client, 2, &uri, range, diagnostics);
-    let action = &actions.as_array().expect("code action array")[0];
+    let actions = actions.as_array().expect("code action array");
+    let action = action_titled(actions, "Disable no-console in nullscan.toml");
 
     let operations = operations(action);
     assert_eq!(operations.len(), 2, "create then edit: {operations:?}");
@@ -151,10 +164,51 @@ fn a_cursor_only_request_offers_the_published_diagnostic() {
     let actions = code_action(client, 2, &uri, cursor, json!([]));
     let actions = actions.as_array().expect("code action array");
 
-    assert_eq!(actions.len(), 1, "actions: {actions:?}");
-    assert_eq!(actions[0]["title"], "Disable no-console in nullscan.toml");
-    assert_eq!(actions[0]["kind"], "quickfix");
-    assert!(new_text(&actions[0]).contains("no-console"));
+    assert_eq!(actions.len(), 2, "actions: {actions:?}");
+    let disable = action_titled(actions, "Disable no-console in nullscan.toml");
+    assert_eq!(disable["kind"], "quickfix");
+    assert!(new_text(disable).contains("no-console"));
+    action_titled(actions, "Suppress no-console on the next line");
+
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+#[test]
+fn a_suppress_action_inserts_the_comment_above_the_diagnostic() {
+    let folder = temp_workspace("code-action-suppress");
+    let file = folder.join("a.ts");
+    let uri = file_uri(&file);
+
+    let mut process = ServerProcess::spawn();
+    let client = &mut process.client;
+    client.initialize(&[&folder]);
+
+    did_open(client, &uri, "function f() {\n  console.log(x);\n}\n");
+    let published = client.notification(PUBLISH_METHOD);
+    let diagnostics = published["params"]["diagnostics"].clone();
+    let range = diagnostics[0]["range"].clone();
+
+    let actions = code_action(client, 2, &uri, range, diagnostics);
+    let actions = actions.as_array().expect("code action array");
+    let action = action_titled(actions, "Suppress no-console on the next line");
+
+    assert_eq!(action["kind"], "quickfix");
+    assert_eq!(action["isPreferred"], false);
+    assert_eq!(action["diagnostics"][0]["code"], "no-console");
+
+    let operations = operations(action);
+    assert_eq!(operations.len(), 1, "the source document is the only target");
+    assert_eq!(operations[0]["textDocument"]["uri"], uri);
+    assert_eq!(operations[0]["textDocument"]["version"], 1);
+    let edit = &operations[0]["edits"][0];
+    assert_eq!(
+        edit["range"],
+        json!({
+            "start": { "line": 1, "character": 0 },
+            "end": { "line": 1, "character": 0 }
+        })
+    );
+    assert_eq!(edit["newText"], "  // nullscan-ignore-next-line no-console\n");
 
     let _ = std::fs::remove_dir_all(folder);
 }

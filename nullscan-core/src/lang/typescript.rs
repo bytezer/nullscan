@@ -1038,6 +1038,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ignore_next_line_comment_drops_the_diagnostic() {
+        let plain = "eval(code);";
+        let suppressed = "// nullscan-ignore-next-line\neval(code);";
+        assert_eq!(rules(plain), vec!["no-eval"]);
+        assert!(rules(suppressed).is_empty());
+        assert!(
+            analyze(suppressed, &Config::default()).len()
+                < analyze(plain, &Config::default()).len()
+        );
+    }
+
+    #[test]
+    fn ignore_line_comment_suppresses_only_the_named_rule() {
+        let plain = "console.log(eval(code));";
+        let suppressed = "console.log(eval(code)); // nullscan-ignore-line no-console";
+        assert_eq!(rules(plain), vec!["no-console", "no-eval"]);
+        assert_eq!(rules(suppressed), vec!["no-eval"]);
+    }
+
     fn switch_source(cases: usize) -> String {
         let mut source = String::from("function f(x: number): number { switch (x) {");
         for case in 1..=cases {

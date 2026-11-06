@@ -8,6 +8,7 @@ mod lang {
 mod language;
 mod rule;
 mod scope;
+mod suppression;
 mod text;
 
 pub use config::Config;
@@ -54,6 +55,9 @@ pub struct Diagnostic {
 }
 
 /// Parses `source` as `language` and runs every file-scoped rule not disabled by `config`.
+///
+/// Diagnostics covered by a `nullscan-ignore-next-line` or `nullscan-ignore-line` comment
+/// (see the `suppression` module) are dropped before returning.
 pub fn analyze(source: &str, language: Language, config: &Config) -> Vec<Diagnostic> {
     let tree = language.parse(source).expect("parse failed");
 
@@ -81,6 +85,7 @@ pub fn analyze(source: &str, language: Language, config: &Config) -> Vec<Diagnos
             diagnostics.extend(run(&context));
         }
     }
+    suppression::apply(&tree, source, &mut diagnostics);
     diagnostics
 }
 

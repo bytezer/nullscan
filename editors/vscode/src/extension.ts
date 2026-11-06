@@ -1,0 +1,474 @@
+import { execFile } from "node:child_process";
+
+import * as vscode from "vscode";
+import {
+  LanguageClient,
+  type LanguageClientOptions,
+  type ServerOptions,
+} from "vscode-languageclient/node";
+
+import { parseServerVersion, resolveServerBinary, type BinarySource } from "./binary";
+import { readSettings } from "./settings";
+import {
+  StatusBar,
+  describeSummary,
+  formatScanResult,
+  refreshStatusBar,
+  requestSummary,
+  type SummaryPayload,
+} from "./summary";
+
+const VERSION_TIMEOUT_MS = 5000;
+
+const CONTINUE = "Continue";
+const OPEN_SETTINGS = "Open Settings";
+const SHOW_OUTPUT = "Show Output";
+const RESTART_SERVER = "Restart Server";
+const ANALYZE_WORKSPACE = "Analyze Workspace";
+const CREATE_CONFIG = "Create";
+
+let activeExtension: NullscanExtension | undefined;
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const output = vscode.window.createOutputChannel("Nullscan", { log: true });
+  const trace = vscode.window.createOutputChannel("Nullscan (trace)", { log: true });
+  const statusBar = new StatusBar();
+  const extension = new NullscanExtension(context, output, trace, statusBar);
+
+  context.subscriptions.push(extension, output, trace, statusBar);
+  activeExtension = extension;
+  await extension.start();
+}
+
+export async function deactivate(): Promise<void> {
+  const extension = activeExtension;
+  activeExtension = undefined;
+  await extension?.stop();
+}
+
+class NullscanExtension implements vscode.Disposable {
+  private client: LanguageClient | undefined;
+  private disposed = false;
+  private readonly disposables: vscode.Disposable[] = [];
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly output: vscode.LogOutputChannel,
+    private readonly trace: vscode.LogOutputChannel,
+    private readonly statusBar: StatusBar,
+  ) {
+    this.disposables.push(...this.registerCommands());
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        void this.onConfigurationChanged(event);
+      }),
+    );
+  }
+
+  async start(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    const settings = readSettings();
+    this.statusBar.setVisible(settings.showStatusBar);
+
+    const binary = resolveServerBinary({
+      configuredPath: settings.path,
+      extensionPath: this.context.extensionPath,
+      platform: process.platform,
+      arch: process.arch,
+    });
+    if (!("path" in binary)) {
+      await this.reportMissingBinary(binary);
+      return;
+    }
+
+    this.output.appendLine(
+      `Nullscan: using ${binary.path} (${sourceLabel(binary.source)}).`,
+    );
+    await this.checkServerVersion(binary.path);
+    if (!this.disposed) {
+      await this.startClient(binary.path);
+    }
+  }
+
+  async stop(): Promise<void> {
+    const client = this.client;
+    this.client = undefined;
+    if (client === undefined) {
+      return;
+    }
+    try {
+      await client.stop();
+      this.output.appendLine("Nullscan: language server stopped.");
+    } catch (error) {
+      this.output.appendLine(
+        `Nullscan: failed to stop the language server: ${messageOf(error)}`,
+      );
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    for (const disposable of this.disposables) {
+      disposable.dispose();
+    }
+    this.disposables.length = 0;
+    void this.stop();
+  }
+
+  private registerCommands(): vscode.Disposable[] {
+    const commands: Array<[string, () => Promise<void>]> = [
+      ["nullscan.analyzeWorkspace", () => this.analyzeWorkspace()],
+      ["nullscan.showSummary", () => this.showSummary()],
+      ["nullscan.openConfig", () => this.openConfig()],
+      ["nullscan.restartServer", () => this.restartServer()],
+    ];
+    return commands.map(([id, run]) => vscode.commands.registerCommand(id, run));
+  }
+
+  private async reportMissingBinary(binary: {
+    error: string;
+    candidates: string[];
+  }): Promise<void> {
+    this.output.appendLine(binary.error);
+    this.output.appendLine(
+      `Nullscan: ${binary.candidates.length} candidate paths were checked.`,
+    );
+    this.statusBar.setUnavailable(binary.error);
+
+    const firstLine = binary.error.split("\n")[0] ?? "nullscan-lsp was not found";
+    const action = await vscode.window.showErrorMessage(
+      `Nullscan: ${firstLine}`,
+      OPEN_SETTINGS,
+      SHOW_OUTPUT,
+    );
+    if (action === OPEN_SETTINGS) {
+      await openNullscanSettings("nullscan.path");
+    } else if (action === SHOW_OUTPUT) {
+      this.output.show();
+    }
+  }
+
+  private async checkServerVersion(binaryPath: string): Promise<void> {
+    const expected = String(this.context.extension.packageJSON.version ?? "");
+    let stdout: string;
+    try {
+      stdout = await runVersion(binaryPath);
+    } catch (error) {
+      this.output.appendLine(
+        `Nullscan: could not run "${binaryPath} --version": ${messageOf(error)}`,
+      );
+      const action = await vscode.window.showWarningMessage(
+        "Nullscan: the language server did not answer --version. Continue only if you know it is the right binary.",
+        CONTINUE,
+        SHOW_OUTPUT,
+      );
+      if (action === SHOW_OUTPUT) {
+        this.output.show();
+      }
+      return;
+    }
+
+    const actual = parseServerVersion(stdout);
+    if (actual === undefined) {
+      this.output.appendLine(
+        `Nullscan: unexpected --version output: ${JSON.stringify(stdout.trim())}`,
+      );
+      this.output.appendLine("Nullscan: continuing without a version check.");
+      return;
+    }
+
+    this.output.appendLine(
+      `Nullscan: language server ${actual}, extension ${expected}.`,
+    );
+    if (actual === expected) {
+      return;
+    }
+
+    const action = await vscode.window.showWarningMessage(
+      `Nullscan: the language server (${actual}) does not match this extension (${expected}). Update both to the same release.`,
+      CONTINUE,
+      OPEN_SETTINGS,
+    );
+    if (action === OPEN_SETTINGS) {
+      await openNullscanSettings("nullscan.path");
+    }
+  }
+
+  private async startClient(binaryPath: string): Promise<void> {
+    const settings = readSettings();
+    if (settings.configPath.length > 0) {
+      this.output.appendLine(
+        "Nullscan: nullscan.configPath is reserved and not passed to the server yet; the server reads nullscan.toml from each workspace folder.",
+      );
+    }
+
+    const serverOptions: ServerOptions = {
+      command: binaryPath,
+      args: ["--stdio"],
+      options: { cwd: firstWorkspaceFolder() },
+    };
+    const clientOptions: LanguageClientOptions = {
+      documentSelector: [
+        { scheme: "file", language: "typescript" },
+        { scheme: "file", language: "typescriptreact" },
+      ],
+      synchronize: {
+        configurationSection: "nullscan",
+        fileEvents: vscode.workspace.createFileSystemWatcher("**/nullscan.toml"),
+      },
+      initializationOptions: { nullscan: settings },
+      outputChannel: this.output,
+      traceOutputChannel: this.trace,
+    };
+
+    const client = new LanguageClient("nullscan", "Nullscan", serverOptions, clientOptions);
+    this.client = client;
+    try {
+      await client.start();
+      this.output.appendLine("Nullscan: language server started.");
+    } catch (error) {
+      this.client = undefined;
+      this.statusBar.setUnavailable(messageOf(error));
+      this.reportError("the language server failed to start", error);
+      return;
+    }
+
+    await this.refresh();
+  }
+
+  private async refresh(): Promise<void> {
+    if (this.client === undefined) {
+      return;
+    }
+    try {
+      await refreshStatusBar(this.client, this.statusBar);
+    } catch (error) {
+      this.output.appendLine(
+        `Nullscan: could not read the cached summary: ${messageOf(error)}`,
+      );
+    }
+  }
+
+  private async analyzeWorkspace(): Promise<void> {
+    const client = this.requireClient();
+    if (client === undefined) {
+      return;
+    }
+
+    let cancelled = false;
+    try {
+      const summary = await vscode.window.withProgress<SummaryPayload>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Nullscan: analyzing workspace",
+          cancellable: true,
+        },
+        (_progress, token) => {
+          token.onCancellationRequested(() => {
+            cancelled = true;
+          });
+          return client.sendRequest<SummaryPayload>("nullscan/analyzeWorkspace", {}, token);
+        },
+      );
+      this.statusBar.setSummary(summary);
+      void vscode.window.showInformationMessage(formatScanResult(summary));
+    } catch (error) {
+      if (cancelled) {
+        this.output.appendLine("Nullscan: workspace scan cancelled.");
+        void vscode.window.showInformationMessage("Nullscan: workspace scan cancelled.");
+        return;
+      }
+      this.reportError("the workspace scan failed", error);
+    }
+  }
+
+  private async showSummary(): Promise<void> {
+    const client = this.requireClient();
+    if (client === undefined) {
+      return;
+    }
+
+    try {
+      const response = await requestSummary(client);
+      this.statusBar.setSummary(response.summary);
+      if (response.summary === null) {
+        void vscode.window.showInformationMessage(
+          'Nullscan: no workspace scan has run yet. Run "Nullscan: Analyze Workspace" first.',
+        );
+        return;
+      }
+      const action = await vscode.window.showInformationMessage(
+        describeSummary(response.summary, response.stale),
+        { modal: true },
+        ANALYZE_WORKSPACE,
+      );
+      if (action === ANALYZE_WORKSPACE) {
+        await vscode.commands.executeCommand("nullscan.analyzeWorkspace");
+      }
+    } catch (error) {
+      this.reportError("could not read the summary", error);
+    }
+  }
+
+  private async openConfig(): Promise<void> {
+    const folder = await pickWorkspaceFolder();
+    if (folder === undefined) {
+      void vscode.window.showWarningMessage(
+        "Nullscan: open a folder to configure nullscan.toml.",
+      );
+      return;
+    }
+
+    const configUri = vscode.Uri.joinPath(folder.uri, "nullscan.toml");
+    if (await fileExists(configUri)) {
+      await vscode.window.showTextDocument(configUri, { preview: false });
+      return;
+    }
+
+    const action = await vscode.window.showInformationMessage(
+      `Nullscan: ${folder.name} has no nullscan.toml.`,
+      CREATE_CONFIG,
+    );
+    if (action !== CREATE_CONFIG) {
+      return;
+    }
+    try {
+      await vscode.workspace.fs.writeFile(
+        configUri,
+        Buffer.from("[rules]\ndisabled = []\n", "utf8"),
+      );
+    } catch (error) {
+      this.reportError(`could not create ${configUri.fsPath}`, error);
+      return;
+    }
+    this.output.appendLine(`Nullscan: created ${configUri.fsPath}.`);
+    await vscode.window.showTextDocument(configUri, { preview: false });
+  }
+
+  private async restartServer(): Promise<void> {
+    this.output.appendLine("Nullscan: restarting the language server.");
+    await this.stop();
+    await this.start();
+  }
+
+  private requireClient(): LanguageClient | undefined {
+    if (this.client !== undefined) {
+      return this.client;
+    }
+    void vscode.window.showWarningMessage(
+      'Nullscan: the language server is not running. Run "Nullscan: Restart Server" to try again.',
+    );
+    return undefined;
+  }
+
+  private async onConfigurationChanged(
+    event: vscode.ConfigurationChangeEvent,
+  ): Promise<void> {
+    if (!event.affectsConfiguration("nullscan")) {
+      return;
+    }
+
+    const settings = readSettings();
+    this.statusBar.setVisible(settings.showStatusBar);
+    if (this.client !== undefined) {
+      try {
+        await this.client.sendNotification("workspace/didChangeConfiguration", {
+          settings: { nullscan: settings },
+        });
+        await refreshStatusBar(this.client, this.statusBar);
+      } catch (error) {
+        this.reportError("could not apply the new settings", error);
+      }
+    }
+
+    if (event.affectsConfiguration("nullscan.path")) {
+      const action = await vscode.window.showInformationMessage(
+        "Nullscan: the server path changed. Restart the language server to use it.",
+        RESTART_SERVER,
+      );
+      if (action === RESTART_SERVER) {
+        await vscode.commands.executeCommand("nullscan.restartServer");
+      }
+    }
+  }
+
+  private reportError(what: string, error: unknown): void {
+    const message = messageOf(error);
+    this.output.appendLine(`Nullscan: ${what}: ${message}`);
+    void vscode.window.showErrorMessage(`Nullscan: ${what}.`, SHOW_OUTPUT).then((action) => {
+      if (action === SHOW_OUTPUT) {
+        this.output.show();
+      }
+    });
+  }
+}
+
+function runVersion(binaryPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      binaryPath,
+      ["--version"],
+      { timeout: VERSION_TIMEOUT_MS, windowsHide: true },
+      (error, stdout) => {
+        if (error !== null) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+async function openNullscanSettings(section: string): Promise<void> {
+  await vscode.commands.executeCommand("workbench.action.openSettings", section);
+}
+
+function firstWorkspaceFolder(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    return undefined;
+  }
+  if (folders.length === 1) {
+    return folders[0];
+  }
+  const picked = await vscode.window.showQuickPick(
+    folders.map((folder) => ({
+      label: folder.name,
+      description: folder.uri.fsPath,
+      folder,
+    })),
+    { placeHolder: "Select the workspace folder for nullscan.toml" },
+  );
+  return picked?.folder;
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sourceLabel(source: BinarySource): string {
+  switch (source) {
+    case "setting":
+      return "nullscan.path";
+    case "bundled":
+      return "bundled binary";
+    case "path":
+      return "PATH";
+  }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

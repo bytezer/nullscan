@@ -1,0 +1,120 @@
+{
+  "name": "nullscan",
+  "displayName": "Nullscan",
+  "description": "TypeScript static analysis powered by the nullscan language server.",
+  "version": "0.1.0",
+  "publisher": "bytezer",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bytezer/nullscan.git"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "typescript",
+    "linter",
+    "static analysis",
+    "nullscan"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "nullscan.analyzeWorkspace",
+        "title": "Analyze Workspace",
+        "category": "Nullscan"
+      },
+      {
+        "command": "nullscan.showSummary",
+        "title": "Show Summary",
+        "category": "Nullscan"
+      },
+      {
+        "command": "nullscan.openConfig",
+        "title": "Open Config",
+        "category": "Nullscan"
+      },
+      {
+        "command": "nullscan.restartServer",
+        "title": "Restart Server",
+        "category": "Nullscan"
+      }
+    ],
+    "configuration": {
+      "title": "Nullscan",
+      "properties": {
+        "nullscan.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the nullscan-lsp executable. When empty, the extension looks for a bundled binary in bin/<platform>-<arch>/ and then on PATH."
+        },
+        "nullscan.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Reserved: path to a nullscan.toml to pass to the server. Not wired yet; the server currently reads nullscan.toml from each workspace folder."
+        },
+        "nullscan.analyzeOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Analyze a document when it is opened."
+        },
+        "nullscan.analyzeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Analyze a document when it is saved."
+        },
+        "nullscan.analyzeOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Analyze a document shortly after it changes. Off by default."
+        },
+        "nullscan.includeDuplicates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include duplicate-code findings in workspace scans."
+        },
+        "nullscan.maxDiagnostics": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1,
+          "description": "Maximum number of diagnostics a workspace scan may report."
+        },
+        "nullscan.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Nullscan status bar item."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.91.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.2",
+    "vitest": "^5.1.0"
+  }
+}

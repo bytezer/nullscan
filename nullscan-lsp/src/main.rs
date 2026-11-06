@@ -4,9 +4,11 @@
 //! parsing is hand-written so this binary never pulls in the CLI's `clap` stack.
 
 mod convert;
+mod debounce;
 mod messages;
 mod requests;
 mod server;
+mod settings;
 mod uri;
 
 use std::env;
@@ -22,6 +24,7 @@ use lsp_types::{
 
 use messages::MessageSink;
 use server::Server;
+use settings::Settings;
 
 const USAGE: &str = "usage: nullscan-lsp --stdio\n       nullscan-lsp --version";
 
@@ -103,8 +106,10 @@ fn serve(connection: &Connection) -> Result<(), String> {
     let mut server = Server::new(
         message_sink(connection),
         server::workspace_folders(&init_params),
+        initial_settings(&init_params),
     );
     let job_results = server.job_results();
+    let debounce_results = server.debounce_results();
 
     loop {
         crossbeam_channel::select! {
@@ -118,9 +123,21 @@ fn serve(connection: &Connection) -> Result<(), String> {
                 let job = job.map_err(|error| format!("job channel closed: {error}"))?;
                 server.finish_job(job);
             }
+            recv(debounce_results) -> uri => {
+                let uri = uri.map_err(|error| format!("debounce channel closed: {error}"))?;
+                server.analyze_debounced(uri);
+            }
         }
     }
     Ok(())
+}
+
+/// Settings the client sent with `initialize`; a missing or `null` payload means defaults.
+fn initial_settings(params: &InitializeParams) -> Settings {
+    params
+        .initialization_options
+        .as_ref()
+        .map_or_else(Settings::default, Settings::from_value)
 }
 
 /// Routes one incoming message; returns `false` when the client asked to shut down.

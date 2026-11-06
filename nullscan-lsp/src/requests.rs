@@ -22,8 +22,9 @@ use crate::messages::{MessageSink, log_message};
 pub const ANALYZE_WORKSPACE_METHOD: &str = "nullscan/analyzeWorkspace";
 pub const SUMMARY_METHOD: &str = "nullscan/summary";
 
-/// A single editor scan never needs every diagnostic of a huge repository in one go.
-const MAX_DIAGNOSTICS: usize = 5000;
+/// Registered as project-scoped in `nullscan-core`, so it is only disabled for a scan and
+/// never reaches the per-file rule set.
+const DUPLICATE_CODE_RULE: &str = "duplicate-code";
 
 /// Optional `{"folders": ["file:///..."]}` payload; omitted means every workspace folder.
 #[derive(Deserialize, Default)]
@@ -37,6 +38,8 @@ pub struct ScanJob {
     pub request_id: RequestId,
     pub folders: Vec<PathBuf>,
     pub overrides: HashMap<PathBuf, String>,
+    pub max_diagnostics: usize,
+    pub include_duplicates: bool,
     pub cancel: Arc<AtomicBool>,
     pub sink: MessageSink,
 }
@@ -75,13 +78,18 @@ fn run(job: &ScanJob) -> ScanReport {
 }
 
 fn scan_folder(job: &ScanJob, folder: &Path) -> ScanReport {
-    let (config, config_path) = folder_config(job, folder);
+    let (mut config, config_path) = folder_config(job, folder);
+    if !job.include_duplicates {
+        // `Config` has no `Clone`; the loader already returns it owned, so mutating it here
+        // keeps `nullscan-workspace`'s API untouched.
+        config.disabled_rules.insert(DUPLICATE_CODE_RULE.to_owned());
+    }
     let paths = [folder.to_path_buf()];
     scan(ScanOptions {
         paths: &paths,
         config,
         config_path,
-        max_diagnostics: Some(MAX_DIAGNOSTICS),
+        max_diagnostics: Some(job.max_diagnostics),
         overrides: Some(&job.overrides),
         cancel: Some(&job.cancel),
     })

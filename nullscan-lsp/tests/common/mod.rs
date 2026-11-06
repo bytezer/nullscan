@@ -84,6 +84,12 @@ impl Client {
 
     /// Sends `initialize`, then `initialized`, and returns the initialize response.
     pub fn initialize(&mut self, folders: &[&Path]) -> Value {
+        self.initialize_with_options(folders, Value::Null)
+    }
+
+    /// Same as [`Client::initialize`], with the settings the client passes as
+    /// `initializationOptions`.
+    pub fn initialize_with_options(&mut self, folders: &[&Path], options: Value) -> Value {
         let workspace_folders: Vec<Value> = folders
             .iter()
             .map(|folder| json!({ "uri": file_uri(folder), "name": "fixture" }))
@@ -95,6 +101,7 @@ impl Client {
             "params": {
                 "processId": null,
                 "capabilities": {},
+                "initializationOptions": options,
                 "workspaceFolders": workspace_folders
             }
         }));
@@ -130,6 +137,37 @@ impl Client {
             }
             self.pending.push(message);
         }
+    }
+
+    /// Waits up to `timeout` for a notification with `method`. Returns `None` on timeout,
+    /// keeping every other message queued, so a test can assert silence.
+    pub fn notification_within(&mut self, method: &str, timeout: Duration) -> Option<Value> {
+        let deadline = Instant::now() + timeout;
+        let mut seen = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let Some(message) = self.next_within(remaining) else {
+                break;
+            };
+            if message["method"] == method {
+                self.pending.splice(0..0, seen);
+                return Some(message);
+            }
+            seen.push(message);
+        }
+        self.pending.splice(0..0, seen);
+        None
+    }
+
+    /// Pops a queued message or waits for a new one, returning `None` after `timeout`.
+    fn next_within(&mut self, timeout: Duration) -> Option<Value> {
+        if !self.pending.is_empty() {
+            return Some(self.pending.remove(0));
+        }
+        self.messages.recv_timeout(timeout).ok()
     }
 
     fn recv(&mut self) -> Value {
@@ -192,3 +230,53 @@ pub fn temp_workspace(label: &str) -> PathBuf {
 pub fn file_uri(path: &Path) -> String {
     format!("file://{}", path.display().to_string().replace(' ', "%20"))
 }
+
+/// The notification that carries diagnostics.
+pub const PUBLISH_METHOD: &str = "textDocument/publishDiagnostics";
+
+/// Sends `workspace/didChangeConfiguration` with a `nullscan` section, the shape an editor
+/// produces when it reads the extension's configuration.
+pub fn configure(client: &mut Client, settings: Value) {
+    client.send(json!({
+        "jsonrpc": "2.0",
+        "method": "workspace/didChangeConfiguration",
+        "params": { "settings": { "nullscan": settings } }
+    }));
+}
+
+pub fn did_open(client: &mut Client, uri: &str, text: &str) {
+    client.send(json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": uri,
+                "languageId": "typescript",
+                "version": 1,
+                "text": text
+            }
+        }
+    }));
+}
+
+pub fn did_change(client: &mut Client, uri: &str, version: i64, text: &str) {
+    client.send(json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": uri, "version": version },
+            "contentChanges": [{ "text": text }]
+        }
+    }));
+}
+
+/// The `code` of every diagnostic in a `publishDiagnostics` notification.
+pub fn diagnostic_codes(published: &Value) -> Vec<String> {
+    published["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array")
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str().map(str::to_owned))
+        .collect()
+}
+

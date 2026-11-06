@@ -4,7 +4,7 @@ mod common;
 
 use serde_json::{Value, json};
 
-use common::{ServerProcess, file_uri, temp_workspace};
+use common::{ServerProcess, configure, file_uri, temp_workspace};
 
 fn open(client: &mut common::Client, uri: &str, text: &str) {
     client.send(json!({
@@ -180,6 +180,42 @@ fn folder_config_disables_rules_for_the_workspace_scan() {
         "config should disable no-console, got {codes:?}"
     );
     assert_eq!(response["result"]["filesScanned"], 1);
+
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+#[test]
+fn include_duplicates_false_disables_the_duplicate_scan() {
+    let folder = temp_workspace("duplicates");
+    let block = (0..40)
+        .map(|i| format!("call{i}();"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let a = folder.join("a.ts");
+    let b = folder.join("b.ts");
+    std::fs::write(&a, format!("function a() {{\n{block}\n}}\n")).expect("write a.ts");
+    std::fs::write(&b, format!("function b() {{\n{block}\n}}\n")).expect("write b.ts");
+    let uri = file_uri(&a);
+
+    let mut process = ServerProcess::spawn();
+    let client = &mut process.client;
+    client.initialize(&[&folder]);
+
+    configure(client, json!({ "includeDuplicates": false }));
+    let (response, _published) = analyze_workspace(client, 2, &uri);
+    assert_eq!(response["result"]["filesScanned"], 2);
+    assert_eq!(response["result"]["duplicates"], 0);
+
+    configure(client, json!({ "includeDuplicates": true }));
+    let (response, _published) = analyze_workspace(client, 3, &uri);
+    assert!(
+        response["result"]["duplicates"]
+            .as_u64()
+            .expect("duplicates count")
+            >= 1,
+        "summary: {}",
+        response["result"]
+    );
 
     let _ = std::fs::remove_dir_all(folder);
 }

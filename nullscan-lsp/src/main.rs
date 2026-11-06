@@ -5,6 +5,7 @@
 
 mod convert;
 mod debounce;
+mod hover;
 mod messages;
 mod requests;
 mod server;
@@ -17,9 +18,9 @@ use std::sync::Arc;
 
 use lsp_server::{Connection, ErrorCode, Message, Request, Response};
 use lsp_types::{
-    InitializeParams, InitializeResult, PositionEncodingKind, SaveOptions, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions,
+    HoverProviderCapability, InitializeParams, InitializeResult, PositionEncodingKind, SaveOptions,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
 };
 
 use messages::MessageSink;
@@ -183,6 +184,7 @@ fn server_capabilities() -> ServerCapabilities {
             },
         )),
         position_encoding: Some(PositionEncodingKind::UTF16),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }

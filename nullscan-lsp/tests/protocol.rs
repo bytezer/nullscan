@@ -23,6 +23,7 @@ fn publishes_diagnostics_on_open_and_exits_cleanly() {
     assert_eq!(capabilities["textDocumentSync"]["change"], 1);
     assert_eq!(capabilities["textDocumentSync"]["save"]["includeText"], false);
     assert_eq!(capabilities["positionEncoding"], "utf-16");
+    assert_eq!(capabilities["hoverProvider"], true);
     assert_eq!(initialize["result"]["serverInfo"]["name"], "nullscan-lsp");
 
     client.send(json!({

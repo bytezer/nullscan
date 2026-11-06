@@ -4,7 +4,7 @@
 //! come back through a job channel, so this module owns every piece of server state and
 //! the dispatch loop only routes messages.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,11 +17,12 @@ use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
     CancelParams, DidChangeConfigurationParams, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, InitializeParams, MessageType, NumberOrString, Uri,
+    DidSaveTextDocumentParams, HoverParams, InitializeParams, MessageType, NumberOrString, Uri,
     notification::{
         Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
         DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _,
     },
+    request::{HoverRequest, Request as _},
 };
 use nullscan_core::{Config, Language, analyze};
 use nullscan_workspace::config::load_in_dir;
@@ -31,6 +32,7 @@ use serde_json::Value;
 
 use crate::convert;
 use crate::debounce::Debouncer;
+use crate::hover;
 use crate::messages::{self, MessageSink, log_message};
 use crate::requests::{self, AnalyzeWorkspaceParams, JobResult, ScanJob};
 use crate::settings::Settings;
@@ -45,6 +47,27 @@ pub struct Document {
     version: i32,
 }
 
+/// Diagnostics published for one URI, split by their lifetime.
+///
+/// The file group follows the buffer (open, save, type, scan); the duplicates group comes
+/// from the last workspace scan and an edit invalidates it because its ranges belong to
+/// the text that was scanned.
+#[derive(Default)]
+struct Published {
+    file: Vec<lsp_types::Diagnostic>,
+    duplicates: Vec<lsp_types::Diagnostic>,
+}
+
+impl Published {
+    fn combined(&self) -> Vec<lsp_types::Diagnostic> {
+        self.file
+            .iter()
+            .chain(&self.duplicates)
+            .cloned()
+            .collect()
+    }
+}
+
 /// Owns every open document, the workspace folders, the in-flight scans and the summary.
 pub struct Server {
     sink: MessageSink,
@@ -54,8 +77,9 @@ pub struct Server {
     settings: Settings,
     documents: HashMap<Uri, Document>,
     folders: Vec<PathBuf>,
-    /// URIs this server has pushed diagnostics for, so a later scan can clear them.
-    published: HashSet<Uri>,
+    /// Everything currently published per URI, so an edit can drop only the duplicates
+    /// and a scan can clear the files that disappeared.
+    published: HashMap<Uri, Published>,
     /// At most one workspace scan runs at a time; the flag is what `$/cancelRequest` sets.
     in_flight: HashMap<lsp_server::RequestId, Arc<AtomicBool>>,
     summary: Option<Value>,
@@ -93,7 +117,7 @@ impl Server {
             settings,
             documents: HashMap::new(),
             folders,
-            published: HashSet::new(),
+            published: HashMap::new(),
             in_flight: HashMap::new(),
             summary: None,
             summary_stale: false,
@@ -159,6 +183,7 @@ impl Server {
         match request.method.as_str() {
             requests::ANALYZE_WORKSPACE_METHOD => self.analyze_workspace(request),
             requests::SUMMARY_METHOD => self.summary_response(request),
+            HoverRequest::METHOD => self.hover_request(request),
             _ => return false,
         }
         true
@@ -211,6 +236,9 @@ impl Server {
         };
         document.text = change.text;
         document.version = params.text_document.version;
+        // The scan ranges and the file ranges no longer describe this text, but only the
+        // duplicates are whole-project data; the file group is refreshed on type/save.
+        self.drop_duplicate_diagnostics(&uri);
         if self.settings.analyze_on_type {
             self.debouncer.schedule(uri);
         }
@@ -218,8 +246,10 @@ impl Server {
 
     fn did_save(&mut self, params: DidSaveTextDocumentParams) {
         self.summary_stale = true;
+        let uri = params.text_document.uri;
+        self.drop_duplicate_diagnostics(&uri);
         if self.settings.analyze_on_save {
-            self.publish_for_document(&params.text_document.uri);
+            self.publish_saved_document(&uri);
         }
     }
 
@@ -228,7 +258,8 @@ impl Server {
         let uri = params.text_document.uri;
         self.documents.remove(&uri);
         // Any queued analyze-on-type work for `uri` is dropped in [`Self::analyze_debounced`].
-        self.publish(&uri, Vec::new(), None);
+        self.publish(&uri, Published::default(), None);
+        self.published.remove(&uri);
     }
 
     /// New settings arrive as the whole `nullscan` section from the client.
@@ -368,48 +399,101 @@ impl Server {
     }
 
     /// Publishes one notification per scanned file and clears URIs that disappeared.
+    ///
+    /// File-scoped diagnostics fill the file group and every duplicate fills the
+    /// duplicates group of both of its sides.
     fn publish_report(&mut self, report: &nullscan_workspace::ScanReport) {
-        let mut current = HashSet::new();
+        let mut duplicates = convert::duplicate_diagnostics(report);
+        let mut current: HashMap<Uri, Published> = HashMap::new();
         for file in &report.files {
             let uri = from_file_path(&file.file);
-            let diagnostics = file
-                .diagnostics
-                .iter()
-                .map(|diagnostic| convert::to_lsp_diagnostic(&file.source, diagnostic))
-                .collect();
-            self.publish(&uri, diagnostics, None);
-            current.insert(uri);
+            let published = Published {
+                file: file
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| convert::to_lsp_diagnostic(&file.source, diagnostic))
+                    .collect(),
+                duplicates: duplicates.remove(&file.file).unwrap_or_default(),
+            };
+            self.send(&uri, &published, None);
+            current.insert(uri, published);
         }
 
-        let gone: Vec<Uri> = self.published.difference(&current).cloned().collect();
+        let gone: Vec<Uri> = self
+            .published
+            .keys()
+            .filter(|uri| !current.contains_key(*uri))
+            .cloned()
+            .collect();
         for uri in gone {
-            self.publish(&uri, Vec::new(), None);
+            self.publish(&uri, Published::default(), None);
         }
         self.published = current;
     }
 
-    /// Analyzes the stored buffer and publishes its diagnostics.
+    /// Analyzes the stored buffer and publishes its diagnostics, keeping the duplicates
+    /// the last workspace scan found.
     fn publish_for_document(&mut self, uri: &Uri) {
         let Some(document) = self.documents.get(uri) else {
             return;
         };
-        let diagnostics = match language_for(uri) {
-            Some(language) => self.analyze_document(uri, &document.text, language),
-            None => {
-                log::debug!("skipping unsupported document {}", uri.as_str());
-                Vec::new()
-            }
-        };
         let version = Some(document.version);
-        self.publish(uri, diagnostics, version);
+        let file = self.analyze_document(uri, &document.text);
+        let duplicates = self.duplicates_for(uri);
+        self.publish(uri, Published { file, duplicates }, version);
     }
 
-    fn analyze_document(
-        &self,
-        uri: &Uri,
-        text: &str,
-        language: Language,
-    ) -> Vec<lsp_types::Diagnostic> {
+    /// Analyzes the stored buffer after a save, when the scan duplicates are stale too.
+    fn publish_saved_document(&mut self, uri: &Uri) {
+        let Some(document) = self.documents.get(uri) else {
+            return;
+        };
+        let version = Some(document.version);
+        let file = self.analyze_document(uri, &document.text);
+        self.publish(
+            uri,
+            Published {
+                file,
+                duplicates: Vec::new(),
+            },
+            version,
+        );
+    }
+
+    fn duplicates_for(&self, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
+        self.published
+            .get(uri)
+            .map(|published| published.duplicates.clone())
+            .unwrap_or_default()
+    }
+
+    /// Drops the duplicates of a just-edited buffer: their ranges describe the text of the
+    /// last workspace scan. The next scan restores them for the new content.
+    fn drop_duplicate_diagnostics(&mut self, uri: &Uri) {
+        let Some(published) = self.published.get(uri) else {
+            return;
+        };
+        if published.duplicates.is_empty() {
+            return;
+        }
+        let file = published.file.clone();
+        let version = self.documents.get(uri).map(|document| document.version);
+        self.publish(
+            uri,
+            Published {
+                file,
+                duplicates: Vec::new(),
+            },
+            version,
+        );
+    }
+
+    /// Analyzes one buffer; unsupported documents publish an empty file group.
+    fn analyze_document(&self, uri: &Uri, text: &str) -> Vec<lsp_types::Diagnostic> {
+        let Some(language) = language_for(uri) else {
+            log::debug!("skipping unsupported document {}", uri.as_str());
+            return Vec::new();
+        };
         let config = self.config_for(uri);
         analyze(text, language, &config)
             .iter()
@@ -453,14 +537,39 @@ impl Server {
         folder.map(PathBuf::as_path).or_else(|| path.parent())
     }
 
-    fn publish(
-        &mut self,
-        uri: &Uri,
-        diagnostics: Vec<lsp_types::Diagnostic>,
-        version: Option<i32>,
-    ) {
-        messages::publish(&self.sink, uri, diagnostics, version);
-        self.published.insert(uri.clone());
+    /// Answers `textDocument/hover` from the diagnostics currently published for the URI.
+    fn hover_request(&mut self, request: &Request) {
+        let id = request.id.clone();
+        let params: HoverParams = match serde_json::from_value(request.params.clone()) {
+            Ok(params) => params,
+            Err(error) => {
+                let message = format!("invalid params: {error}");
+                return self.reply_error(id, ErrorCode::InvalidParams, message);
+            }
+        };
+        let position_params = params.text_document_position_params;
+        let hover = self
+            .published
+            .get(&position_params.text_document.uri)
+            .and_then(|published| {
+                hover::hover_at(&published.file, position_params.position).or_else(|| {
+                    hover::hover_at(&published.duplicates, position_params.position)
+                })
+            });
+        let result = hover
+            .map(|hover| serde_json::to_value(hover).unwrap_or(Value::Null))
+            .unwrap_or(Value::Null);
+        self.reply_ok(id, result);
+    }
+
+    /// Publishes both groups in one notification and remembers them for the next edit.
+    fn publish(&mut self, uri: &Uri, published: Published, version: Option<i32>) {
+        self.send(uri, &published, version);
+        self.published.insert(uri.clone(), published);
+    }
+
+    fn send(&self, uri: &Uri, published: &Published, version: Option<i32>) {
+        messages::publish(&self.sink, uri, published.combined(), version);
     }
 
     fn reply_ok(&self, id: lsp_server::RequestId, result: Value) {
@@ -614,14 +723,34 @@ mod tests {
     }
 
     fn open(server: &mut Server) {
+        open_text(server, "console.log(x);\n");
+    }
+
+    fn open_text(server: &mut Server, text: &str) {
         server.did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: document_uri(),
                 language_id: "typescript".to_owned(),
                 version: 1,
-                text: "console.log(x);\n".to_owned(),
+                text: text.to_owned(),
             },
         });
+    }
+
+    /// Sends `textDocument/hover` and returns its `result` value.
+    fn hover(
+        server: &mut Server,
+        messages: &Arc<Mutex<Vec<Message>>>,
+        id: i32,
+        line: u32,
+        character: u32,
+    ) -> Value {
+        let params = json!({
+            "textDocument": { "uri": document_uri() },
+            "position": { "line": line, "character": character }
+        });
+        assert!(server.handle_request(&request(id, "textDocument/hover", params)));
+        response_for(messages, id).expect("hover response")
     }
 
     fn change(server: &mut Server, version: i32, text: &str) {
@@ -734,7 +863,7 @@ mod tests {
     fn unknown_requests_are_left_to_the_dispatch_loop() {
         let (mut server, _messages) = server();
 
-        assert!(!server.handle_request(&request(9, "textDocument/hover", json!({}))));
+        assert!(!server.handle_request(&request(9, "textDocument/codeAction", json!({}))));
     }
 
     #[test]
@@ -957,5 +1086,161 @@ mod tests {
         let publishes = published(&messages);
         assert_eq!(publishes.len(), 2);
         assert_eq!(publishes[1].uri, document_uri());
+    }
+
+    #[test]
+    fn hover_describes_the_rule_under_the_cursor() {
+        let (mut server, messages) = server();
+        open(&mut server);
+
+        let result = hover(&mut server, &messages, 20, 0, 3);
+
+        assert_eq!(result["contents"]["kind"], "markdown");
+        let value = result["contents"]["value"].as_str().expect("markdown value");
+        assert!(value.contains("**no-console**"), "hover: {value}");
+        assert!(value.contains("Unexpected console call"), "hover: {value}");
+        assert!(value.contains("unexpected console call"), "hover: {value}");
+        assert_eq!(
+            result["range"],
+            json!({
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 14 }
+            })
+        );
+    }
+
+    #[test]
+    fn hover_over_whitespace_returns_null() {
+        let (mut server, messages) = server();
+        open(&mut server);
+
+        let result = hover(&mut server, &messages, 21, 0, 14);
+
+        assert!(result.is_null(), "hover: {result}");
+    }
+
+    #[test]
+    fn hover_in_a_multi_rule_file_picks_the_diagnostic_under_the_cursor() {
+        let (mut server, messages) = server();
+        open_text(&mut server, "console.log(x);\nconst y: any = 1;\n");
+
+        let console = hover(&mut server, &messages, 22, 0, 0);
+        let console_value = console["contents"]["value"].as_str().expect("hover value");
+        assert!(console_value.contains("**no-console**"), "hover: {console_value}");
+
+        let any = hover(&mut server, &messages, 23, 1, 10);
+        let any_value = any["contents"]["value"].as_str().expect("hover value");
+        assert!(
+            any_value.contains("**no-explicit-any**"),
+            "hover: {any_value}"
+        );
+        assert!(
+            any_value.contains("Avoid the explicit 'any' type"),
+            "hover: {any_value}"
+        );
+    }
+
+    fn report_with_duplicate() -> nullscan_workspace::ScanReport {
+        use nullscan_core::{Duplicate, DuplicateLocation, Severity};
+        use nullscan_workspace::{FileResult, ScanReport};
+
+        ScanReport {
+            files: vec![
+                FileResult {
+                    file: PathBuf::from("/tmp/fixture/a.ts"),
+                    language: Language::TypeScript,
+                    source: "one\ntwo\nthree\nfour\n".to_owned(),
+                    diagnostics: vec![nullscan_core::Diagnostic {
+                        rule: "no-console",
+                        severity: Severity::Info,
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 2,
+                        message: "unexpected console call".to_owned(),
+                    }],
+                },
+                FileResult {
+                    file: PathBuf::from("/tmp/fixture/b.ts"),
+                    language: Language::TypeScript,
+                    source: "alpha\nbeta\ngamma\ndelta\n".to_owned(),
+                    diagnostics: Vec::new(),
+                },
+            ],
+            duplicates: vec![Duplicate {
+                token_count: 35,
+                a: DuplicateLocation {
+                    file: PathBuf::from("/tmp/fixture/a.ts"),
+                    start_line: 2,
+                    end_line: 4,
+                },
+                b: DuplicateLocation {
+                    file: PathBuf::from("/tmp/fixture/b.ts"),
+                    start_line: 1,
+                    end_line: 3,
+                },
+            }],
+            warnings: Vec::new(),
+            duration: Duration::ZERO,
+            truncated: false,
+            cancelled: false,
+            config_path: None,
+            disabled_rules: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_scan_publishes_duplicates_on_both_sides() {
+        let (mut server, messages) = server();
+
+        server.publish_report(&report_with_duplicate());
+
+        let publishes = published(&messages);
+        assert_eq!(publishes.len(), 2);
+        assert_eq!(
+            publishes[0].uri,
+            "file:///tmp/fixture/a.ts".parse().expect("uri")
+        );
+        assert_eq!(
+            publishes[1].uri,
+            "file:///tmp/fixture/b.ts".parse().expect("uri")
+        );
+        for publish in &publishes {
+            let duplicate = publish
+                .diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.code
+                        == Some(NumberOrString::String("duplicate-code".to_owned()))
+                })
+                .expect("duplicate-code diagnostic");
+            assert!(duplicate.related_information.is_some());
+        }
+        assert_eq!(publishes[0].diagnostics.len(), 2);
+        assert_eq!(publishes[1].diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn dropping_duplicates_keeps_the_file_group() {
+        let (mut server, messages) = server();
+        server.publish_report(&report_with_duplicate());
+        let uri: Uri = "file:///tmp/fixture/a.ts".parse().expect("uri");
+
+        server.drop_duplicate_diagnostics(&uri);
+
+        let last = published(&messages).pop().expect("republish after edit");
+        assert_eq!(last.uri, uri);
+        assert_eq!(last.version, None);
+        let codes: Vec<_> = last
+            .diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code.clone())
+            .collect();
+        assert_eq!(
+            codes,
+            vec![NumberOrString::String("no-console".to_owned())],
+            "only the file group survives"
+        );
+        assert!(server.published[&uri].duplicates.is_empty());
     }
 }

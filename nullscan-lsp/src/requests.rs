@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crossbeam_channel::Sender;
 use lsp_server::RequestId;
 use lsp_types::MessageType;
-use nullscan_core::Config;
 use nullscan_workspace::{ScanOptions, ScanReport, config, merge, scan};
 use serde::Deserialize;
 
@@ -80,7 +79,11 @@ fn run(job: &ScanJob) -> ScanReport {
 }
 
 fn scan_folder(job: &ScanJob, folder: &Path) -> ScanReport {
-    let (mut config, config_path) = folder_config(job, folder);
+    let loaded = folder_config(job, folder);
+    let mut config = loaded.config;
+    let config_path = loaded.path;
+    let files_ignore = loaded.ignore;
+    let duplicates_ignore = loaded.duplicates_ignore;
     if !job.include_duplicates {
         // `Config` has no `Clone`; the loader already returns it owned, so mutating it here
         // keeps `nullscan-workspace`'s API untouched.
@@ -94,13 +97,15 @@ fn scan_folder(job: &ScanJob, folder: &Path) -> ScanReport {
         max_diagnostics: Some(job.max_diagnostics),
         overrides: Some(&job.overrides),
         cancel: Some(&job.cancel),
+        files_ignore: Some(&files_ignore),
+        duplicates_ignore: Some(&duplicates_ignore),
     })
 }
 
 /// An explicit `--config` wins over the folder's own file. A broken or missing config is
 /// reported and the folder is scanned with defaults, so one bad file never hides every
 /// diagnostic of a workspace.
-fn folder_config(job: &ScanJob, folder: &Path) -> (Config, Option<PathBuf>) {
+fn folder_config(job: &ScanJob, folder: &Path) -> config::LoadedConfig {
     let loaded = match &job.config_path {
         Some(path) => config::load(Some(path)),
         None => config::load_in_dir(folder),
@@ -110,13 +115,13 @@ fn folder_config(job: &ScanJob, folder: &Path) -> (Config, Option<PathBuf>) {
             for warning in &loaded.warnings {
                 log_message(&job.sink, MessageType::WARNING, warning);
             }
-            (loaded.config, loaded.path)
+            loaded
         }
         Err(error) => {
             let message = format!("nullscan config: {error}");
             log::warn!("{message}");
             log_message(&job.sink, MessageType::WARNING, &message);
-            (Config::default(), None)
+            config::defaults_in(folder)
         }
     }
 }

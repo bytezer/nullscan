@@ -10,15 +10,24 @@ use std::path::{Path, PathBuf};
 use nullscan_core::Config;
 use serde::Deserialize;
 
+use crate::ignore::PathFilter;
+
 #[derive(Deserialize, Default)]
 struct FileConfig {
     rules: Option<FileRulesConfig>,
     thresholds: Option<FileThresholdsConfig>,
+    files: Option<FileIgnoreConfig>,
+    duplicates: Option<FileIgnoreConfig>,
 }
 
 #[derive(Deserialize, Default)]
 struct FileRulesConfig {
     disabled: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Default)]
+struct FileIgnoreConfig {
+    ignore: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Default)]
@@ -44,6 +53,12 @@ pub struct LoadedConfig {
     pub path: Option<PathBuf>,
     /// Non-fatal problems (for example an unknown disabled rule id).
     pub warnings: Vec<String>,
+    /// `[files].ignore`, applied to every analysis.
+    pub ignore: PathFilter,
+    /// `[duplicates].ignore`, applied only to clone detection.
+    pub duplicates_ignore: PathFilter,
+    /// Directory ignore patterns are relative to.
+    pub root: PathBuf,
 }
 
 /// Resolves and loads the config: `explicit_path` if given, else `./nullscan.toml` if it
@@ -52,47 +67,89 @@ pub struct LoadedConfig {
 /// Returns `Err` with a message ready to print on a missing explicit path or a TOML
 /// parse error; callers decide how to fail. No input from the user can panic this code.
 pub fn load(explicit_path: Option<&Path>) -> Result<LoadedConfig, String> {
-    let path = resolve_path(explicit_path);
-    let Some(path) = path else {
-        return Ok(LoadedConfig {
-            config: Config::default(),
-            path: None,
-            warnings: Vec::new(),
-        });
-    };
-
-    let text = fs::read_to_string(&path)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    let file_config: FileConfig = toml::from_str(&text)
-        .map_err(|error| format!("invalid config file {}: {error}", path.display()))?;
-
-    let mut config = Config::default();
-    let mut warnings = Vec::new();
-    apply_rules(&file_config, &mut config, &path, &mut warnings);
-    apply_thresholds(&file_config, &mut config);
-
-    Ok(LoadedConfig {
-        config,
-        path: Some(absolute(path)),
-        warnings,
-    })
+    match resolve_path(explicit_path) {
+        Some(path) => load_file(&path),
+        None => Ok(defaults_in(&current_dir())),
+    }
 }
 
-/// Loads `dir/nullscan.toml` when it exists, else the built-in defaults.
+/// Loads `dir/nullscan.toml` when it exists, else the built-in defaults rooted at `dir`.
 ///
 /// This is the editor-facing entry point: every workspace folder resolves its own config
 /// without depending on the process working directory. A missing file is not an error.
 pub fn load_in_dir(dir: &Path) -> Result<LoadedConfig, String> {
     let candidate = dir.join("nullscan.toml");
     if candidate.is_file() {
-        return load(Some(&candidate));
+        return load_file(&candidate);
     }
 
+    Ok(defaults_in(dir))
+}
+
+fn load_file(path: &Path) -> Result<LoadedConfig, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let file_config: FileConfig = toml::from_str(&text)
+        .map_err(|error| format!("invalid config file {}: {error}", path.display()))?;
+
+    let root = config_root(path);
+    let mut config = Config::default();
+    let mut warnings = Vec::new();
+    apply_rules(&file_config, &mut config, path, &mut warnings);
+    apply_thresholds(&file_config, &mut config);
+
+    let ignore_patterns = file_config
+        .files
+        .as_ref()
+        .and_then(|files| files.ignore.as_deref())
+        .unwrap_or_default();
+    let duplicates_patterns = file_config
+        .duplicates
+        .as_ref()
+        .and_then(|duplicates| duplicates.ignore.as_deref())
+        .unwrap_or_default();
+    let (ignore, mut ignore_warnings) = PathFilter::new(root.clone(), ignore_patterns);
+    let (duplicates_ignore, mut duplicates_warnings) =
+        PathFilter::new(root.clone(), duplicates_patterns);
+    warnings.append(&mut ignore_warnings);
+    warnings.append(&mut duplicates_warnings);
+
     Ok(LoadedConfig {
+        config,
+        path: Some(absolute(path.to_path_buf())),
+        warnings,
+        ignore,
+        duplicates_ignore,
+        root,
+    })
+}
+
+/// Built-in defaults with empty filters rooted at `root`.
+///
+/// Used when a config file is missing or broken but callers still need the root to apply
+/// the process-wide defaults.
+pub fn defaults_in(root: &Path) -> LoadedConfig {
+    let root = absolute(root.to_path_buf());
+    let (ignore, _) = PathFilter::new(root.clone(), &[]);
+    let (duplicates_ignore, _) = PathFilter::new(root.clone(), &[]);
+    LoadedConfig {
         config: Config::default(),
         path: None,
         warnings: Vec::new(),
-    })
+        ignore,
+        duplicates_ignore,
+        root,
+    }
+}
+
+fn config_root(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(current_dir, |parent| absolute(parent.to_path_buf()))
+}
+
+fn current_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn resolve_path(explicit_path: Option<&Path>) -> Option<PathBuf> {
@@ -198,6 +255,9 @@ mod tests {
         assert!(loaded.config.disabled_rules.is_empty());
         assert_eq!(loaded.config.cognitive_complexity_threshold, 15);
         assert_eq!(loaded.config.duplicate_code_min_tokens, 30);
+        assert!(loaded.ignore.is_empty());
+        assert!(loaded.duplicates_ignore.is_empty());
+        assert_eq!(loaded.root, std::env::current_dir().expect("cwd"));
     }
 
     #[test]
@@ -296,6 +356,87 @@ mod tests {
         assert!(loaded.warnings.is_empty());
         assert!(loaded.config.rule_enabled("no-console"));
         assert_eq!(loaded.config.cognitive_complexity_threshold, 15);
+        assert!(loaded.ignore.is_empty());
+        assert!(loaded.duplicates_ignore.is_empty());
+        assert_eq!(loaded.root, dir.canonicalize().expect("canonicalize"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn both_ignore_sections_are_parsed() {
+        let path = temp_file(
+            "ignore-sections",
+            r#"
+            [files]
+            ignore = ["tests", "**/*.test.ts"]
+
+            [duplicates]
+            ignore = ["tests/mocks/**"]
+            "#,
+        );
+        let root = path.parent().expect("parent").to_path_buf();
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.warnings.is_empty());
+        assert!(!loaded.ignore.is_empty());
+        assert!(loaded.ignore.matches(&root.join("src/tests/a.ts")));
+        assert!(loaded.ignore.matches(&root.join("src/deep/a.test.ts")));
+        assert!(!loaded.ignore.matches(&root.join("src/a.ts")));
+        assert!(!loaded.duplicates_ignore.is_empty());
+        assert!(loaded.duplicates_ignore.matches(&root.join("tests/mocks/a.ts")));
+        assert!(!loaded.duplicates_ignore.matches(&root.join("tests/a.ts")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn absent_ignore_sections_mean_no_filtering() {
+        let path = temp_file("ignore-absent", "[rules]\ndisabled = []\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.ignore.is_empty());
+        assert!(loaded.duplicates_ignore.is_empty());
+        assert!(!loaded.ignore.matches(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn wrong_ignore_type_is_a_config_error() {
+        let path = temp_file("ignore-wrong-type", "[files]\nignore = \"tests\"\n");
+
+        let Err(error) = load(Some(&path)) else {
+            panic!("wrong ignore type must fail");
+        };
+
+        assert!(error.starts_with(&format!("invalid config file {}:", path.display())));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn ignore_warnings_are_merged_into_the_loaded_config() {
+        let path = temp_file("ignore-warning", "[files]\nignore = [\"!tests\"]\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert_eq!(loaded.warnings.len(), 1);
+        assert!(loaded.warnings[0].contains("negation is not supported"));
+        assert!(loaded.ignore.is_empty());
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn root_is_the_directory_that_contains_the_config() {
+        let dir = temp_dir("root");
+        let path = dir.join("nullscan.toml");
+        fs::write(&path, "[files]\nignore = [\"tests\"]\n").expect("write config");
+
+        let explicit = load(Some(&path)).expect("load explicit config");
+        assert_eq!(explicit.root, dir.canonicalize().expect("canonicalize"));
+        assert!(explicit.ignore.matches(&dir.join("tests/a.ts")));
+
+        let folder = load_in_dir(&dir).expect("load folder config");
+        assert_eq!(folder.root, dir.canonicalize().expect("canonicalize"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

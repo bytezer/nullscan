@@ -14,6 +14,7 @@ use nullscan_core::{
 };
 use rayon::prelude::*;
 
+use crate::ignore::PathFilter;
 use crate::walk;
 
 /// Everything a caller can control about a scan.
@@ -27,6 +28,10 @@ pub struct ScanOptions<'a> {
     pub overrides: Option<&'a HashMap<PathBuf, String>>,
     /// Checked before analyzing each file; once set the scan returns early.
     pub cancel: Option<&'a AtomicBool>,
+    /// Files excluded from both the walk and per-file analysis.
+    pub files_ignore: Option<&'a PathFilter>,
+    /// Files excluded only from clone detection; they are still analyzed by the rules.
+    pub duplicates_ignore: Option<&'a PathFilter>,
 }
 
 /// One successfully read and analyzed file, in input order.
@@ -59,7 +64,7 @@ pub struct ScanReport {
 /// kept and [`ScanReport::cancelled`] says they are partial.
 pub fn scan(options: ScanOptions<'_>) -> ScanReport {
     let started = Instant::now();
-    let walked = walk::collect_files(options.paths);
+    let walked = walk::collect_files(options.paths, options.files_ignore);
     let mut warnings = walked.warnings;
 
     let results: Vec<Option<Result<FileResult, String>>> = walked
@@ -90,7 +95,7 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
     let duplicates = if cancelled {
         Vec::new()
     } else {
-        find_duplicates_if_enabled(&files, &options.config)
+        find_duplicates_if_enabled(&files, &options.config, options.duplicates_ignore)
     };
     let total_diagnostics: usize = files.iter().map(|file| file.diagnostics.len()).sum();
     let truncated = cap_diagnostics(&mut files, options.max_diagnostics, total_diagnostics);
@@ -226,15 +231,24 @@ fn single_config_path(paths: Vec<PathBuf>) -> Option<PathBuf> {
     }
 }
 
-fn find_duplicates_if_enabled(files: &[FileResult], config: &Config) -> Vec<Duplicate> {
+fn find_duplicates_if_enabled(
+    files: &[FileResult],
+    config: &Config,
+    ignore: Option<&PathFilter>,
+) -> Vec<Duplicate> {
     if !config.rule_enabled("duplicate-code") {
         return Vec::new();
     }
     let sources: Vec<(PathBuf, Language, String)> = files
         .iter()
+        .filter(|file| !is_ignored(ignore, &file.file))
         .map(|file| (file.file.clone(), file.language, file.source.clone()))
         .collect();
     find_duplicates(&sources, config.duplicate_code_min_tokens)
+}
+
+fn is_ignored(ignore: Option<&PathFilter>, path: &Path) -> bool {
+    ignore.is_some_and(|filter| filter.matches(path))
 }
 
 /// Keeps the first `max` diagnostics in file order. Returns whether any were dropped.
@@ -274,6 +288,8 @@ mod tests {
 
     use nullscan_core::DuplicateLocation;
 
+    use crate::ignore::PathFilter;
+
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -295,6 +311,8 @@ mod tests {
             max_diagnostics: max,
             overrides: None,
             cancel: None,
+            files_ignore: None,
+            duplicates_ignore: None,
         }
     }
 
@@ -470,5 +488,80 @@ mod tests {
         assert!(merged.truncated);
         assert!(merged.cancelled);
         assert_eq!(merged.config_path, None);
+    }
+
+    #[test]
+    fn files_ignore_removes_directories_from_the_walk() {
+        let root = temp_dir("files-ignore");
+        fs::create_dir_all(root.join("src")).expect("create src dir");
+        fs::write(root.join("src/a.ts"), "console.log(1);\n").expect("write a.ts");
+        fs::create_dir_all(root.join("tests")).expect("create tests dir");
+        fs::write(root.join("tests/b.ts"), "console.log(2);\n").expect("write b.ts");
+        let (files_ignore, warnings) = PathFilter::new(root.clone(), &["tests".to_string()]);
+        assert!(warnings.is_empty());
+
+        let report = scan(ScanOptions {
+            files_ignore: Some(&files_ignore),
+            ..options(&[root.clone()], Config::default(), None)
+        });
+
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].file, root.join("src/a.ts"));
+        assert_eq!(report.files[0].diagnostics.len(), 1);
+        assert!(report.warnings.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_explicitly_ignored_file_produces_a_warning() {
+        let root = temp_dir("explicit-ignore");
+        let file = root.join("tests/b.ts");
+        fs::create_dir_all(root.join("tests")).expect("create tests dir");
+        fs::write(&file, "console.log(1);\n").expect("write b.ts");
+        let (files_ignore, _) = PathFilter::new(root.clone(), &["tests".to_string()]);
+
+        let report = scan(ScanOptions {
+            files_ignore: Some(&files_ignore),
+            ..options(&[file.clone()], Config::default(), None)
+        });
+
+        assert!(report.files.is_empty());
+        assert_eq!(
+            report.warnings,
+            vec![format!(
+                "ignoring {}: excluded by nullscan.toml",
+                file.display()
+            )]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn duplicates_ignore_keeps_files_analyzed_but_out_of_clone_detection() {
+        let root = temp_dir("duplicates-ignore");
+        let source = "export function sum(values: number[]): number {\n  let total = 0;\n  for (const value of values) {\n    total += value;\n  }\n  return total;\n}\n";
+        fs::create_dir_all(root.join("tests/mocks")).expect("create mocks dir");
+        fs::write(root.join("tests/mocks/a.ts"), source).expect("write a.ts");
+        fs::write(root.join("tests/mocks/b.ts"), source).expect("write b.ts");
+
+        let mut detected = Config::default();
+        detected.duplicate_code_min_tokens = 5;
+        let baseline = scan(options(&[root.clone()], detected, None));
+        assert_eq!(baseline.files.len(), 2);
+        assert!(!baseline.duplicates.is_empty());
+
+        let (duplicates_ignore, warnings) =
+            PathFilter::new(root.clone(), &["tests/mocks/**".to_string()]);
+        assert!(warnings.is_empty());
+        let mut filter_config = Config::default();
+        filter_config.duplicate_code_min_tokens = 5;
+        let filtered = scan(ScanOptions {
+            duplicates_ignore: Some(&duplicates_ignore),
+            ..options(&[root.clone()], filter_config, None)
+        });
+
+        assert_eq!(filtered.files.len(), 2);
+        assert!(filtered.duplicates.is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -6,6 +6,7 @@
 //! dependency so both binaries can depend on it without pulling in each other's stack.
 
 pub mod config;
+pub mod ignore;
 pub mod json;
 pub mod scan;
 pub mod walk;

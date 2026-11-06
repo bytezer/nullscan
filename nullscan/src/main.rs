@@ -17,7 +17,7 @@ enum Format {
 }
 
 #[derive(Parser)]
-#[command(name = "nullscan", about = "Fast, open-source static analysis for TypeScript")]
+#[command(name = "nullscan", about = "Fast, open-source static analysis for TypeScript", version)]
 struct Args {
     /// TypeScript files or directories to analyze (globs are expanded by your shell)
     #[arg(required = true)]
@@ -69,6 +69,8 @@ fn main() -> ExitCode {
         max_diagnostics: args.max_diagnostics,
         overrides: None,
         cancel: None,
+        files_ignore: Some(&loaded.ignore),
+        duplicates_ignore: Some(&loaded.duplicates_ignore),
     });
     report.warnings.extend(loaded.warnings);
     report.warnings.sort();

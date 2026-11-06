@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, for example v0.1.0 or v0.1.0-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    name: Verify tag and versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Tag matches Cargo.toml and package.json
+        run: ./scripts/check-version.sh "$TAG"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            ext: ""
+          - target: x86_64-apple-darwin
+            os: macos-14
+            ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-14
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build the CLI and the language server
+        run: cargo build --release -p nullscan -p nullscan-lsp --target ${{ matrix.target }}
+      - name: Stage raw binaries with release names
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/nullscan${{ matrix.ext }}" \
+            "dist/nullscan-${{ matrix.target }}${{ matrix.ext }}"
+          cp "target/${{ matrix.target }}/release/nullscan-lsp${{ matrix.ext }}" \
+            "dist/nullscan-lsp-${{ matrix.target }}${{ matrix.ext }}"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  vsix:
+    name: Package VSIX
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Install
+        run: pnpm --dir editors/vscode install --frozen-lockfile
+      - name: Build
+        run: pnpm --dir editors/vscode build
+      - name: Package
+        run: pnpm --dir editors/vscode package --no-dependencies --out "$GITHUB_WORKSPACE/nullscan-${TAG#v}.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nullscan-vsix
+          path: nullscan-*.vsix
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    name: Publish GitHub Release
+    needs: [build, vsix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Verify assets and write checksums
+        env:
+          TARGETS: "x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc"
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          missing=0
+          for target in $TARGETS; do
+            suffix=""
+            case "$target" in
+              *windows*) suffix=".exe" ;;
+            esac
+            for name in nullscan nullscan-lsp; do
+              asset="$name-$target$suffix"
+              if [ -f "assets/$asset" ]; then
+                cp "assets/$asset" "publish/$asset"
+              else
+                echo "::error::Missing release asset: $asset"
+                missing=1
+              fi
+            done
+          done
+          vsix="nullscan-${TAG#v}.vsix"
+          if [ -f "assets/$vsix" ]; then
+            cp "assets/$vsix" "publish/$vsix"
+          else
+            echo "::error::Missing release asset: $vsix"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          count=$(find publish -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 11 ]; then
+            echo "::error::Expected 11 release assets, found $count"
+            find publish -maxdepth 1 -type f -printf '%f\n' | sort
+            exit 1
+          fi
+          (cd publish && sha256sum * > ../checksums.txt)
+          mv checksums.txt publish/checksums.txt
+          echo "Release assets:"
+          ls -l publish
+          echo "checksums.txt:"
+          cat publish/checksums.txt
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          generate_release_notes: true
+          files: publish/*
+          body: |
+            Version `${{ env.TAG }}`.
+
+            - `nullscan-<triple>` and `nullscan-lsp-<triple>` (`.exe` on Windows): raw CLI and language server binaries for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`.
+            - `checksums.txt`: SHA-256 of every asset here; the VS Code extension reads it to verify the language server it downloads.
+            - `nullscan-<version>.vsix`: the VS Code extension. Install it with `code --install-extension <file>`.
+
+            See [RELEASING.md](https://github.com/bytezer/nullscan/blob/main/RELEASING.md) for the release checklist.

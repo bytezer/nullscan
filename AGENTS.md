@@ -17,9 +17,25 @@ pnpm --dir editors/vscode test
 pnpm --dir editors/vscode build              # bundle dist/extension.js
 NULLSCAN_LSP_PATH=$(pwd)/target/debug/nullscan-lsp pnpm --dir editors/vscode test:integration
 pnpm --dir editors/vscode package --no-dependencies --out /tmp/nullscan.vsix
+./scripts/check-coupling.sh                  # cargo tree guards, same as CI
+./scripts/check-version.sh v0.1.0            # tag vs Cargo.toml + package.json
 ```
 
-There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test --workspace` is the verification step. Edition 2024 requires a recent toolchain (tested on 1.98).
+There is no rustfmt/clippy config or pre-commit hook; `cargo test --workspace` is the local
+verification step. Edition 2024 requires a recent toolchain (tested on 1.98).
+
+CI lives in `.github/workflows/ci.yml` (push to `main` and pull requests): `cargo test
+--workspace`, the `cargo tree` coupling guards (`scripts/check-coupling.sh`), the extension
+typecheck/unit tests/build, and the real VS Code integration test under `xvfb-run`.
+Releases are tag-driven through `.github/workflows/release.yml`, which runs
+`scripts/check-version.sh <tag>` in a `verify` job before building anything.
+
+The version is single-sourced: Rust members use `version.workspace = true` and read
+`[workspace.package].version` from `Cargo.toml`; the internal path dependencies carry no
+`version`. `editors/vscode/package.json` must be bumped to the same value, and
+`scripts/check-version.sh <tag>` (or `v<version>`) exits `1` when any of the three
+disagrees. Release steps, asset names and re-run instructions live in `RELEASING.md`; the
+shipped scope per version is in `CHANGELOG.md`.
 
 ## Commits
 

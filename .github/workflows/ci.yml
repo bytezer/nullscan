@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  guards:
+    name: Coupling guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./scripts/check-coupling.sh
+
+  extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Install
+        run: pnpm --dir editors/vscode install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --dir editors/vscode typecheck
+      - name: Unit tests
+        run: pnpm --dir editors/vscode test
+      - name: Build
+        run: pnpm --dir editors/vscode build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the language server
+        run: cargo build -p nullscan-lsp
+      - name: Integration test (real VS Code under Xvfb)
+        run: |
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          xvfb-run -a env NULLSCAN_LSP_PATH="$GITHUB_WORKSPACE/target/debug/nullscan-lsp" "$(which pnpm)" --dir editors/vscode test:integration
+
+  vsix:
+    name: Package VSIX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Install
+        run: pnpm --dir editors/vscode install --frozen-lockfile
+      - name: Build
+        run: pnpm --dir editors/vscode build
+      - name: Package
+        run: pnpm --dir editors/vscode package --no-dependencies --out "$GITHUB_WORKSPACE/nullscan.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nullscan-vsix
+          path: nullscan.vsix
+          if-no-files-found: error
+          retention-days: 7

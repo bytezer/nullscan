@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["nullscan", "nullscan-core", "nullscan-lsp", "nullscan-workspace"]
+
+[workspace.package]
+version = "0.1.0"

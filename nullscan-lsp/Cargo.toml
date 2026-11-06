@@ -1,6 +1,6 @@
 [package]
 name = "nullscan-lsp"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [[bin]]
@@ -13,8 +13,8 @@ env_logger = "0.11.8"
 log = "0.4.34"
 lsp-server = "0.10"
 lsp-types = "0.97"
-nullscan-core = { version = "0.1.0", path = "../nullscan-core" }
-nullscan-workspace = { version = "0.1.0", path = "../nullscan-workspace" }
+nullscan-core = { path = "../nullscan-core" }
+nullscan-workspace = { path = "../nullscan-workspace" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 toml_edit = "0.25"

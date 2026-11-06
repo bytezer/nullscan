@@ -1,5 +1,7 @@
 # nullscan
 
+[![CI](https://github.com/bytezer/nullscan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bytezer/nullscan/actions/workflows/ci.yml)
+
 A fast, open-source static code analyzer written in Rust. Starts with TypeScript support.
 Born as a lightweight alternative to SonarQube: no JVM, first-class CLI, and none of the
 community edition's limitations (branch analysis, etc.).
@@ -66,6 +68,21 @@ The integration suite runs a real VS Code instance against a local server build:
 cargo build -p nullscan-lsp
 NULLSCAN_LSP_PATH=$(pwd)/target/debug/nullscan-lsp pnpm --dir editors/vscode test:integration
 ```
+
+## Install the VS Code extension
+
+Every release ships a VSIX plus the matching language server binaries. Download the
+`.vsix` from [Releases](https://github.com/bytezer/nullscan/releases) and install it from a
+terminal:
+
+```sh
+code --install-extension nullscan-0.1.0.vsix
+```
+
+Or use **Extensions** → **…** → **Install from VSIX…** in VS Code. On first use the
+extension resolves `nullscan-lsp` from `nullscan.path`, a bundled binary, a verified
+download of the same release, or `PATH`; the download is checked against the release's
+`checksums.txt`. See `editors/vscode/README.md` for settings, commands and limitations.
 
 ## Configuration
 
@@ -169,6 +186,16 @@ missing, so a new rule cannot land without regression coverage.
 See [FINDINGS.md](./FINDINGS.md) for technical gotchas discovered along the way
 (tree-sitter, rule architecture, etc.).
 
+## Releasing
+
+CI runs on every push to `main` and every pull request (`.github/workflows/ci.yml`).
+Releases are tag-driven: bump `[workspace.package].version` and
+`editors/vscode/package.json` together, push a `v<version>` tag, and
+`.github/workflows/release.yml` builds the five binary pairs, the VSIX and `checksums.txt`
+and publishes them as a GitHub Release. The full checklist, including how to re-run a failed
+job, is in [RELEASING.md](./RELEASING.md); `scripts/check-version.sh <tag>` verifies the
+version sources locally.
+
 ## Achievements
 
 What's shipped, and what's next.
@@ -180,7 +207,7 @@ What's shipped, and what's next.
 - [x] Parallelized analysis (`rayon`)
 - [x] Reusable per-file lexical scope graph (bindings, references, read/write counts)
 - [x] SARIF output for CI/editor integration
-- [ ] VS Code extension (surface diagnostics inline as you type)
+- [x] VS Code extension (inline diagnostics, issue trees, workspace summary)
 - [x] Configurable rule thresholds and disabling (`nullscan.toml` / `--config`)
 - [ ] More languages beyond TypeScript
 

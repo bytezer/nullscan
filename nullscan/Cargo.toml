@@ -1,11 +1,11 @@
 [package]
 name = "nullscan"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
-nullscan-core = { version = "0.1.0", path = "../nullscan-core" }
-nullscan-workspace = { version = "0.1.0", path = "../nullscan-workspace" }
+nullscan-core = { path = "../nullscan-core" }
+nullscan-workspace = { path = "../nullscan-workspace" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

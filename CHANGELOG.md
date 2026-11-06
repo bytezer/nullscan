@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with
 pre-release versions such as `0.x.0-beta.1` for testers.
 
+## [0.1.0-beta.3] - 2026-11-06
+
+Testing round focused on signal quality and on making the rules understandable
+without leaving the editor.
+
+### Added
+
+- **Rule catalog** — every rule now has a human `title` and a one-sentence `why`,
+  exposed to the extension through the `nullscan/rules` request. The **By Rule** tree
+  shows the title with the rule id as description, the summary panel shows both, and a
+  new **Nullscan: Show Rule Documentation** command opens `RULES.md#<rule-id>` (from a
+  rule node or from a palette QuickPick).
+- **Richer hover and docs links** — the hover shows the title, severity, rationale and
+  the concrete message, and every diagnostic carries `codeDescription.href` pointing at
+  its `RULES.md` anchor. Each catalog row has a stable `<a id="<rule-id>"></a>` anchor,
+  guarded by a test so docs links cannot rot.
+- **Logic-only clone detection** — `duplicate-code` ignores presentational markup by
+  default: JSX tags, attributes, strings, `jsx_text`, static JSX and `<svg>` subtrees do
+  not count, while logic inside `{...}` does. This stops different SVG icons that share a
+  header from being reported as duplicates. `[duplicates] compare-markup = true` restores
+  the previous behavior.
+
+### Changed
+
+- **Actionable diagnostic messages** — 34 message sites now say what to do, not only what
+  happened (for example `avoid 'any'; use a specific type or 'unknown'`).
+
 ## [0.1.0-beta.2] - 2026-11-06
 
 Tester feedback round: finer control over what is analyzed, without editing rule code.

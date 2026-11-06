@@ -9,57 +9,59 @@ Upstream identifiers below are SonarJS rule keys (the `S####` IDs used by
 equivalent exists, the cell says so rather than guessing an ID. Category values are
 `bug`, `code smell`, `metric`, `duplication`, or `security`.
 
+Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-console`), and the LSP hover and `codeDescription` links point at those anchors.
+
 | nullscan ID | Category | Source / equivalent catalog rule | Implementation status |
 |---|---|---|---|
-| `no-console` | code smell | SonarJS S106 `no-console`; ESLint `no-console` | Implemented (file-scoped) |
-| `no-debugger` | code smell | SonarJS S1525 `no-debugger`; ESLint `no-debugger` | Implemented (file-scoped) |
-| `no-var` | code smell | SonarJS S3504 `no-var`; ESLint `no-var` | Implemented (file-scoped) |
-| `eqeqeq` | bug | SonarJS S1440 `eqeqeq`; ESLint `eqeqeq` | Implemented (file-scoped) |
-| `no-explicit-any` | code smell | SonarJS S4204 `no-explicit-any`; typescript-eslint `no-explicit-any` | Implemented (file-scoped) |
-| `no-empty-catch` | bug | SonarJS S2486 `no-ignored-exceptions`; ESLint `no-empty` (catch blocks) | Implemented (file-scoped) |
-| `cognitive-complexity` | metric | SonarJS S3776 `cognitive-complexity`; no ESLint core equivalent (ESLint `complexity` is cyclomatic) | Implemented (file-scoped) |
-| `no-duplicate-string` | code smell | SonarJS S1192 `no-duplicate-string` | Implemented (file-scoped) |
-| `no-identical-conditions` | bug | SonarJS S1862 `no-identical-conditions`; ESLint `no-dupe-else-if` | Implemented (file-scoped) |
-| `no-redundant-boolean` | code smell | SonarJS S1125 `no-redundant-boolean` | Implemented (file-scoped) |
-| `prefer-immediate-return` | code smell | SonarJS S1488 `prefer-immediate-return` | Implemented (file-scoped) |
-| `no-collapsible-if` | code smell | SonarJS S1066 `no-collapsible-if` | Implemented (file-scoped) |
-| `no-identical-expressions` | bug | SonarJS S1764 `no-identical-expressions`; ESLint `no-self-compare` (subset) | Implemented (file-scoped) |
-| `no-duplicated-branches` | bug | SonarJS S1871 `no-duplicated-branches` | Implemented (file-scoped) |
-| `no-all-duplicated-branches` | bug | SonarJS S3923 `no-all-duplicated-branches` | Implemented (file-scoped) |
-| `no-useless-catch` | code smell | SonarJS S2737 `no-useless-catch`; ESLint `no-useless-catch` | Implemented (file-scoped) |
-| `no-redundant-jump` | code smell | SonarJS S3626 `no-redundant-jump`; ESLint `no-useless-return` (return only) | Implemented (file-scoped) |
-| `prefer-single-boolean-return` | code smell | SonarJS S1126 `prefer-single-boolean-return` | Implemented (file-scoped) |
-| `no-nested-switch` | code smell | SonarJS S1821 `no-nested-switch` | Implemented (file-scoped) |
-| `no-nested-template-literals` | code smell | SonarJS S4624 `no-nested-template-literals` | Implemented (file-scoped) |
-| `no-small-switch` | code smell | SonarJS S1301 `no-small-switch` | Implemented (file-scoped; `no-small-switch-min-cases`) |
-| `max-switch-cases` | code smell | SonarJS S1479 `max-switch-cases` | Implemented (file-scoped; `max-switch-cases`) |
-| `no-same-line-conditional` | code smell | SonarJS S3972 `no-same-line-conditional` | Implemented (file-scoped) |
-| `non-existent-operator` | bug | SonarJS S2757 `non-existent-operator` | Implemented (file-scoped) |
-| `no-self-assign` | bug | SonarJS S1656 `no-self-assign`; ESLint `no-self-assign` | Implemented (file-scoped) |
-| `no-constant-condition` | bug | ESLint `no-constant-condition`; no SonarJS equivalent | Implemented (file-scoped; `if` and ternary only) |
-| `use-isnan` | bug | SonarJS S2688 `use-isnan`; ESLint `use-isnan` | Implemented (file-scoped) |
-| `no-array-constructor` | code smell | SonarJS S1528 `array-constructor`; ESLint/typescript-eslint `no-array-constructor` | Implemented (file-scoped) |
-| `no-new-wrappers` | bug | SonarJS S1533 `no-primitive-wrappers`; ESLint `no-new-wrappers` | Implemented (file-scoped) |
-| `no-duplicate-imports` | code smell | SonarJS S3863 `no-duplicate-imports` (via eslint-plugin-import `no-duplicates`); ESLint `no-duplicate-imports` | Implemented (file-scoped) |
-| `no-unused-vars` | code smell | SonarJS S1481 (unused local variables); ESLint/typescript-eslint `no-unused-vars` | Implemented (file-scoped; scope analysis) |
-| `no-shadow` | code smell | SonarJS S1117 `no-shadow`; typescript-eslint `no-shadow`; ESLint `no-shadow` | Implemented (file-scoped; scope analysis) |
-| `no-use-before-define` | bug | SonarJS S3827 (variables should be defined before being used); ESLint/typescript-eslint `no-use-before-define` | Implemented (file-scoped; same-scope, scope analysis) |
-| `prefer-const` | code smell | SonarJS S3353 `prefer-const`; ESLint `prefer-const` | Implemented (file-scoped; scope analysis) |
-| `no-redeclare` | code smell | SonarJS S2814 `no-redeclare`; ESLint/typescript-eslint `no-redeclare` | Implemented (file-scoped; scope analysis) |
-| `no-unreachable` | bug | SonarJS S1763 `no-unreachable`; ESLint `no-unreachable` | Implemented (file-scoped; `return`/`throw`/`break`/`continue`, terminating blocks and `if`/`else`; no `try`/`switch`/loop analysis) |
-| `no-fallthrough` | bug | SonarJS S128 `no-fallthrough`; ESLint `no-fallthrough` | Implemented (file-scoped; non-final `case` only, empty cases allowed, comment opt-out) |
-| `consistent-return` | bug | SonarJS S3801 `no-inconsistent-returns`; ESLint `consistent-return` | Implemented (file-scoped; path-insensitive) |
-| `no-one-iteration-loop` | code smell | SonarJS S1751 `no-one-iteration-loop`; ESLint `no-unreachable-loop` | Implemented (file-scoped; top-level unconditional exits only) |
-| `no-unused-collection` | code smell | SonarJS S4030 `no-unused-collection`; no direct ESLint core equivalent | Implemented (file-scoped; scope analysis; local array/object/`Map`/`Set` only) |
-| `no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
-| `no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
-| `no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
-| `no-eval` | security | ESLint `no-eval`; no direct SonarJS equivalent | Implemented (file-scoped; direct calls and common global/member spellings only) |
-| `no-implied-eval` | security | ESLint `no-implied-eval`; no direct SonarJS equivalent | Implemented (file-scoped; string literals and substitution-free templates only) |
-| `no-new-func` | security | ESLint `no-new-func`; no direct SonarJS equivalent | Implemented (file-scoped; bare and common global/member forms) |
-| `no-script-url` | security | ESLint `no-script-url`; no direct SonarJS equivalent | Implemented (file-scoped; string and substitution-free template literals) |
-| `hardcoded-secrets` | security | SonarJS S6418 (hard-coded secrets); no ESLint core equivalent | Implemented (file-scoped; name/value heuristic, not a secret scanner) |
-| `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI; executable logic only, JSX markup opt-in via `[duplicates].compare-markup`) |
+| <a id="no-console"></a>`no-console` | code smell | SonarJS S106 `no-console`; ESLint `no-console` | Implemented (file-scoped) |
+| <a id="no-debugger"></a>`no-debugger` | code smell | SonarJS S1525 `no-debugger`; ESLint `no-debugger` | Implemented (file-scoped) |
+| <a id="no-var"></a>`no-var` | code smell | SonarJS S3504 `no-var`; ESLint `no-var` | Implemented (file-scoped) |
+| <a id="eqeqeq"></a>`eqeqeq` | bug | SonarJS S1440 `eqeqeq`; ESLint `eqeqeq` | Implemented (file-scoped) |
+| <a id="no-explicit-any"></a>`no-explicit-any` | code smell | SonarJS S4204 `no-explicit-any`; typescript-eslint `no-explicit-any` | Implemented (file-scoped) |
+| <a id="no-empty-catch"></a>`no-empty-catch` | bug | SonarJS S2486 `no-ignored-exceptions`; ESLint `no-empty` (catch blocks) | Implemented (file-scoped) |
+| <a id="cognitive-complexity"></a>`cognitive-complexity` | metric | SonarJS S3776 `cognitive-complexity`; no ESLint core equivalent (ESLint `complexity` is cyclomatic) | Implemented (file-scoped) |
+| <a id="no-duplicate-string"></a>`no-duplicate-string` | code smell | SonarJS S1192 `no-duplicate-string` | Implemented (file-scoped) |
+| <a id="no-identical-conditions"></a>`no-identical-conditions` | bug | SonarJS S1862 `no-identical-conditions`; ESLint `no-dupe-else-if` | Implemented (file-scoped) |
+| <a id="no-redundant-boolean"></a>`no-redundant-boolean` | code smell | SonarJS S1125 `no-redundant-boolean` | Implemented (file-scoped) |
+| <a id="prefer-immediate-return"></a>`prefer-immediate-return` | code smell | SonarJS S1488 `prefer-immediate-return` | Implemented (file-scoped) |
+| <a id="no-collapsible-if"></a>`no-collapsible-if` | code smell | SonarJS S1066 `no-collapsible-if` | Implemented (file-scoped) |
+| <a id="no-identical-expressions"></a>`no-identical-expressions` | bug | SonarJS S1764 `no-identical-expressions`; ESLint `no-self-compare` (subset) | Implemented (file-scoped) |
+| <a id="no-duplicated-branches"></a>`no-duplicated-branches` | bug | SonarJS S1871 `no-duplicated-branches` | Implemented (file-scoped) |
+| <a id="no-all-duplicated-branches"></a>`no-all-duplicated-branches` | bug | SonarJS S3923 `no-all-duplicated-branches` | Implemented (file-scoped) |
+| <a id="no-useless-catch"></a>`no-useless-catch` | code smell | SonarJS S2737 `no-useless-catch`; ESLint `no-useless-catch` | Implemented (file-scoped) |
+| <a id="no-redundant-jump"></a>`no-redundant-jump` | code smell | SonarJS S3626 `no-redundant-jump`; ESLint `no-useless-return` (return only) | Implemented (file-scoped) |
+| <a id="prefer-single-boolean-return"></a>`prefer-single-boolean-return` | code smell | SonarJS S1126 `prefer-single-boolean-return` | Implemented (file-scoped) |
+| <a id="no-nested-switch"></a>`no-nested-switch` | code smell | SonarJS S1821 `no-nested-switch` | Implemented (file-scoped) |
+| <a id="no-nested-template-literals"></a>`no-nested-template-literals` | code smell | SonarJS S4624 `no-nested-template-literals` | Implemented (file-scoped) |
+| <a id="no-small-switch"></a>`no-small-switch` | code smell | SonarJS S1301 `no-small-switch` | Implemented (file-scoped; `no-small-switch-min-cases`) |
+| <a id="max-switch-cases"></a>`max-switch-cases` | code smell | SonarJS S1479 `max-switch-cases` | Implemented (file-scoped; `max-switch-cases`) |
+| <a id="no-same-line-conditional"></a>`no-same-line-conditional` | code smell | SonarJS S3972 `no-same-line-conditional` | Implemented (file-scoped) |
+| <a id="non-existent-operator"></a>`non-existent-operator` | bug | SonarJS S2757 `non-existent-operator` | Implemented (file-scoped) |
+| <a id="no-self-assign"></a>`no-self-assign` | bug | SonarJS S1656 `no-self-assign`; ESLint `no-self-assign` | Implemented (file-scoped) |
+| <a id="no-constant-condition"></a>`no-constant-condition` | bug | ESLint `no-constant-condition`; no SonarJS equivalent | Implemented (file-scoped; `if` and ternary only) |
+| <a id="use-isnan"></a>`use-isnan` | bug | SonarJS S2688 `use-isnan`; ESLint `use-isnan` | Implemented (file-scoped) |
+| <a id="no-array-constructor"></a>`no-array-constructor` | code smell | SonarJS S1528 `array-constructor`; ESLint/typescript-eslint `no-array-constructor` | Implemented (file-scoped) |
+| <a id="no-new-wrappers"></a>`no-new-wrappers` | bug | SonarJS S1533 `no-primitive-wrappers`; ESLint `no-new-wrappers` | Implemented (file-scoped) |
+| <a id="no-duplicate-imports"></a>`no-duplicate-imports` | code smell | SonarJS S3863 `no-duplicate-imports` (via eslint-plugin-import `no-duplicates`); ESLint `no-duplicate-imports` | Implemented (file-scoped) |
+| <a id="no-unused-vars"></a>`no-unused-vars` | code smell | SonarJS S1481 (unused local variables); ESLint/typescript-eslint `no-unused-vars` | Implemented (file-scoped; scope analysis) |
+| <a id="no-shadow"></a>`no-shadow` | code smell | SonarJS S1117 `no-shadow`; typescript-eslint `no-shadow`; ESLint `no-shadow` | Implemented (file-scoped; scope analysis) |
+| <a id="no-use-before-define"></a>`no-use-before-define` | bug | SonarJS S3827 (variables should be defined before being used); ESLint/typescript-eslint `no-use-before-define` | Implemented (file-scoped; same-scope, scope analysis) |
+| <a id="prefer-const"></a>`prefer-const` | code smell | SonarJS S3353 `prefer-const`; ESLint `prefer-const` | Implemented (file-scoped; scope analysis) |
+| <a id="no-redeclare"></a>`no-redeclare` | code smell | SonarJS S2814 `no-redeclare`; ESLint/typescript-eslint `no-redeclare` | Implemented (file-scoped; scope analysis) |
+| <a id="no-unreachable"></a>`no-unreachable` | bug | SonarJS S1763 `no-unreachable`; ESLint `no-unreachable` | Implemented (file-scoped; `return`/`throw`/`break`/`continue`, terminating blocks and `if`/`else`; no `try`/`switch`/loop analysis) |
+| <a id="no-fallthrough"></a>`no-fallthrough` | bug | SonarJS S128 `no-fallthrough`; ESLint `no-fallthrough` | Implemented (file-scoped; non-final `case` only, empty cases allowed, comment opt-out) |
+| <a id="consistent-return"></a>`consistent-return` | bug | SonarJS S3801 `no-inconsistent-returns`; ESLint `consistent-return` | Implemented (file-scoped; path-insensitive) |
+| <a id="no-one-iteration-loop"></a>`no-one-iteration-loop` | code smell | SonarJS S1751 `no-one-iteration-loop`; ESLint `no-unreachable-loop` | Implemented (file-scoped; top-level unconditional exits only) |
+| <a id="no-unused-collection"></a>`no-unused-collection` | code smell | SonarJS S4030 `no-unused-collection`; no direct ESLint core equivalent | Implemented (file-scoped; scope analysis; local array/object/`Map`/`Set` only) |
+| <a id="no-element-overwrite"></a>`no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
+| <a id="no-ignored-return"></a>`no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
+| <a id="no-gratuitous-expressions"></a>`no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
+| <a id="no-eval"></a>`no-eval` | security | ESLint `no-eval`; no direct SonarJS equivalent | Implemented (file-scoped; direct calls and common global/member spellings only) |
+| <a id="no-implied-eval"></a>`no-implied-eval` | security | ESLint `no-implied-eval`; no direct SonarJS equivalent | Implemented (file-scoped; string literals and substitution-free templates only) |
+| <a id="no-new-func"></a>`no-new-func` | security | ESLint `no-new-func`; no direct SonarJS equivalent | Implemented (file-scoped; bare and common global/member forms) |
+| <a id="no-script-url"></a>`no-script-url` | security | ESLint `no-script-url`; no direct SonarJS equivalent | Implemented (file-scoped; string and substitution-free template literals) |
+| <a id="hardcoded-secrets"></a>`hardcoded-secrets` | security | SonarJS S6418 (hard-coded secrets); no ESLint core equivalent | Implemented (file-scoped; name/value heuristic, not a secret scanner) |
+| <a id="duplicate-code"></a>`duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI; executable logic only, JSX markup opt-in via `[duplicates].compare-markup`) |
 
 ### Conservative limits
 

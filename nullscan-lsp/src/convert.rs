@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location,
-    NumberOrString, Position, Range,
+    CodeDescription, Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity,
+    Location, NumberOrString, Position, Range, Uri,
 };
 use nullscan_core::{
     Diagnostic, DuplicateLocation, Severity, byte_col_to_utf16, severity_of,
@@ -27,7 +27,7 @@ pub fn to_lsp_diagnostic(source: &str, diagnostic: &Diagnostic) -> LspDiagnostic
         range: to_range(source, diagnostic),
         severity: Some(severity(diagnostic.severity)),
         code: Some(NumberOrString::String(diagnostic.rule.to_owned())),
-        code_description: None,
+        code_description: code_description(diagnostic.rule),
         source: Some("nullscan".to_owned()),
         message: diagnostic.message.clone(),
         related_information: None,
@@ -54,6 +54,15 @@ fn severity(severity: Severity) -> DiagnosticSeverity {
         Severity::Warning => DiagnosticSeverity::WARNING,
         Severity::Info => DiagnosticSeverity::INFORMATION,
     }
+}
+
+/// The `RULES.md#<rule>` link an editor can open from the diagnostic; an unparsable URL
+/// simply yields no link instead of failing the conversion.
+fn code_description(rule: &str) -> Option<CodeDescription> {
+    crate::rules::docs_url(rule)
+        .parse::<Uri>()
+        .ok()
+        .map(|href| CodeDescription { href })
 }
 
 /// Turns every duplicate into one diagnostic per side, grouped by the file that receives
@@ -114,7 +123,7 @@ fn duplicate_diagnostic(
         range: duplicate_range(side.source, side.location),
         severity: Some(severity(severity_of(DUPLICATE_CODE_RULE))),
         code: Some(NumberOrString::String(DUPLICATE_CODE_RULE.to_owned())),
-        code_description: None,
+        code_description: code_description(DUPLICATE_CODE_RULE),
         source: Some("nullscan".to_owned()),
         message: message.clone(),
         related_information: Some(vec![DiagnosticRelatedInformation {
@@ -279,6 +288,19 @@ mod tests {
         assert_eq!(
             to_lsp_diagnostic(source, &warning).severity,
             Some(DiagnosticSeverity::WARNING)
+        );
+    }
+
+    #[test]
+    fn code_description_links_to_the_rule_anchor() {
+        let mut diagnostic = diagnostic(1, 1, 1, 2);
+        diagnostic.rule = "eqeqeq";
+
+        let lsp = to_lsp_diagnostic("a == b\n", &diagnostic);
+        let link = lsp.code_description.expect("code description");
+        assert_eq!(
+            link.href.as_str(),
+            "https://github.com/bytezer/nullscan/blob/main/RULES.md#eqeqeq"
         );
     }
 

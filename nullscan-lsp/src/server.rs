@@ -210,6 +210,7 @@ impl Server {
         match request.method.as_str() {
             requests::ANALYZE_WORKSPACE_METHOD => self.analyze_workspace(request),
             requests::SUMMARY_METHOD => self.summary_response(request),
+            crate::rules::RULES_METHOD => self.rules_response(request),
             HoverRequest::METHOD => self.hover_request(request),
             CodeActionRequest::METHOD => self.code_action_request(request),
             _ => return false,
@@ -413,6 +414,12 @@ impl Server {
             "summary": self.summary,
             "stale": self.summary_stale,
         });
+        self.reply_ok(request.id.clone(), result);
+    }
+
+    /// Returns the whole rule catalog; the request carries no parameters worth reading.
+    fn rules_response(&self, request: &Request) {
+        let result = serde_json::to_value(crate::rules::catalog()).unwrap_or(Value::Null);
         self.reply_ok(request.id.clone(), result);
     }
 
@@ -1094,6 +1101,30 @@ mod tests {
     }
 
     #[test]
+    fn rules_request_returns_the_whole_catalog() {
+        let (mut server, messages) = server();
+
+        assert!(server.handle_request(&request(
+            13,
+            crate::rules::RULES_METHOD,
+            Value::Null
+        )));
+
+        let result = response_for(&messages, 13).expect("ok response");
+        let catalog = result.as_array().expect("catalog array");
+        assert_eq!(catalog.len(), nullscan_core::RULES.len());
+        let eqeqeq = catalog
+            .iter()
+            .find(|info| info["id"] == "eqeqeq")
+            .expect("eqeqeq entry");
+        assert_eq!(eqeqeq["title"], "Use strict equality");
+        assert_eq!(
+            eqeqeq["docs_url"],
+            "https://github.com/bytezer/nullscan/blob/main/RULES.md#eqeqeq"
+        );
+    }
+
+    #[test]
     fn unknown_requests_are_left_to_the_dispatch_loop() {
         let (mut server, _messages) = server();
 
@@ -1331,10 +1362,22 @@ mod tests {
 
         assert_eq!(result["contents"]["kind"], "markdown");
         let value = result["contents"]["value"].as_str().expect("markdown value");
-        assert!(value.contains("**no-console**"), "hover: {value}");
-        assert!(value.contains("Unexpected console call"), "hover: {value}");
+        assert!(
+            value.contains("**Remove console calls** (`no-console`)"),
+            "hover: {value}"
+        );
+        assert!(
+            value.contains("Console calls are for local debugging only"),
+            "hover should include the registry rationale: {value}"
+        );
         assert!(
             value.contains("remove this console call or use the logger"),
+            "hover: {value}"
+        );
+        assert!(
+            value.contains(
+                "[More](https://github.com/bytezer/nullscan/blob/main/RULES.md#no-console)"
+            ),
             "hover: {value}"
         );
         assert_eq!(
@@ -1363,16 +1406,19 @@ mod tests {
 
         let console = hover(&mut server, &messages, 22, 0, 0);
         let console_value = console["contents"]["value"].as_str().expect("hover value");
-        assert!(console_value.contains("**no-console**"), "hover: {console_value}");
+        assert!(
+            console_value.contains("**Remove console calls** (`no-console`)"),
+            "hover: {console_value}"
+        );
 
         let any = hover(&mut server, &messages, 23, 1, 10);
         let any_value = any["contents"]["value"].as_str().expect("hover value");
         assert!(
-            any_value.contains("**no-explicit-any**"),
+            any_value.contains("**Avoid the any type** (`no-explicit-any`)"),
             "hover: {any_value}"
         );
         assert!(
-            any_value.contains("Avoid the explicit 'any' type"),
+            any_value.contains("turns off type checking"),
             "hover: {any_value}"
         );
     }

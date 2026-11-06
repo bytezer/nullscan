@@ -1,13 +1,14 @@
 //! Rule hover: turns the published diagnostic under the cursor into Markdown.
 //!
 //! The server owns the published groups; this module only knows how a range contains a
-//! position and how a diagnostic becomes a short, English hover.
+//! position and how a diagnostic becomes a short, English hover. Registered rules get the
+//! catalog title, rationale and documentation link; unknown codes keep a plain fallback.
 
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, Hover, HoverContents, MarkupContent,
     MarkupKind, NumberOrString, Position, Range,
 };
-use nullscan_core::RULES;
+use nullscan_core::{RULES, RuleMeta};
 
 /// Builds the hover for the first diagnostic whose range contains `position`.
 pub fn hover_at(diagnostics: &[LspDiagnostic], position: Position) -> Option<Hover> {
@@ -26,11 +27,10 @@ pub fn contains(range: Range, position: Position) -> bool {
 }
 
 fn hover_for(diagnostic: &LspDiagnostic) -> Hover {
-    let rule = rule_id(diagnostic).unwrap_or("nullscan");
-    let description = description_of(rule).unwrap_or(&diagnostic.message);
-    let severity = severity_label(diagnostic.severity);
-    let message = &diagnostic.message;
-    let value = format!("**{rule}** — {severity}\n\n{description}\n\n{message}");
+    let value = match rule_id(diagnostic).and_then(registered_rule) {
+        Some(meta) => documented_hover(meta, diagnostic),
+        None => fallback_hover(diagnostic),
+    };
 
     Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -41,6 +41,30 @@ fn hover_for(diagnostic: &LspDiagnostic) -> Hover {
     }
 }
 
+/// Title, id, level, rationale, concrete message and the `RULES.md` link.
+fn documented_hover(meta: &'static RuleMeta, diagnostic: &LspDiagnostic) -> String {
+    format!(
+        "**{title}** (`{id}`) — {severity}\n\n{why}\n\n{message}\n\n[More]({docs})",
+        title = meta.title,
+        id = meta.id,
+        severity = level_label(diagnostic.severity),
+        why = meta.why,
+        message = diagnostic.message,
+        docs = crate::rules::docs_url(meta.id),
+    )
+}
+
+/// The pre-catalog shape, kept for codes that are not in `RULES`.
+fn fallback_hover(diagnostic: &LspDiagnostic) -> String {
+    let rule = rule_id(diagnostic).unwrap_or("nullscan");
+    let description = description_of(rule).unwrap_or(&diagnostic.message);
+    let severity = severity_label(diagnostic.severity);
+    format!(
+        "**{rule}** — {severity}\n\n{description}\n\n{message}",
+        message = diagnostic.message,
+    )
+}
+
 fn rule_id(diagnostic: &LspDiagnostic) -> Option<&str> {
     match diagnostic.code.as_ref()? {
         NumberOrString::String(code) => Some(code.as_str()),
@@ -48,11 +72,23 @@ fn rule_id(diagnostic: &LspDiagnostic) -> Option<&str> {
     }
 }
 
-fn description_of(rule: &str) -> Option<&'static str> {
+fn registered_rule(rule: &str) -> Option<&'static RuleMeta> {
     RULES
         .iter()
         .find(|registered| registered.meta.id == rule)
-        .map(|registered| registered.meta.description)
+        .map(|registered| &registered.meta)
+}
+
+fn description_of(rule: &str) -> Option<&'static str> {
+    registered_rule(rule).map(|meta| meta.description)
+}
+
+fn level_label(severity: Option<DiagnosticSeverity>) -> &'static str {
+    match severity {
+        Some(DiagnosticSeverity::ERROR) => "Error",
+        Some(DiagnosticSeverity::WARNING) => "Warning",
+        _ => "Info",
+    }
 }
 
 fn severity_label(severity: Option<DiagnosticSeverity>) -> &'static str {
@@ -118,7 +154,10 @@ mod tests {
         );
         assert_eq!(
             value(&hover),
-            "**no-console** — warning\n\nUnexpected console call\n\nunexpected console call"
+            "**Remove console calls** (`no-console`) — Warning\n\n\
+             Console calls are for local debugging only; remove them or log through the project logger.\n\n\
+             unexpected console call\n\n\
+             [More](https://github.com/bytezer/nullscan/blob/main/RULES.md#no-console)"
         );
     }
 

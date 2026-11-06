@@ -103,6 +103,21 @@ fn fixtures_match_expected_diagnostics() {
     }
 }
 
+/// Every rule row carries `<a id="<rule-id>"></a>` so `RULES.md#<rule-id>` stays a stable
+/// GitHub anchor. The LSP builds `codeDescription` and hover links from the same pattern.
+#[test]
+fn every_rule_has_a_rules_md_anchor() {
+    let catalog = include_str!("../../RULES.md");
+    for rule in RULES {
+        let anchor = format!("<a id=\"{}\"></a>", rule.meta.id);
+        assert!(
+            catalog.contains(&anchor),
+            "RULES.md is missing the anchor {anchor} for rule '{}'",
+            rule.meta.id
+        );
+    }
+}
+
 #[test]
 fn every_file_rule_has_valid_and_invalid_fixtures() {
     for rule in RULES.iter().filter(|rule| rule.scope == RuleScope::File) {

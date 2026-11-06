@@ -10,6 +10,7 @@ mod debounce;
 mod hover;
 mod messages;
 mod requests;
+mod rules;
 mod server;
 mod settings;
 mod uri;

@@ -46,10 +46,10 @@ jobs:
             os: ubuntu-24.04-arm
             ext: ""
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-latest
             ext: ""
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-latest
             ext: ""
           - target: x86_64-pc-windows-msvc
             os: windows-latest

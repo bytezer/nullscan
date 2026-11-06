@@ -1,15 +1,16 @@
 # AGENTS.md
 
-`nullscan` is a Rust workspace for a TypeScript static analyzer: a reusable core crate plus a CLI. Read `README.md` for usage and `FINDINGS.md` for the full tree-sitter investigation notes.
+`nullscan` is a Rust workspace for a TypeScript static analyzer: a reusable core crate, a shared workspace crate, and a CLI. Read `README.md` for usage and `FINDINGS.md` for the full tree-sitter investigation notes.
 
 ## Commands
 
 ```sh
-cargo test --workspace                       # full suite (~20s, 129 tests)
+cargo test --workspace                       # full suite (~20s, 159 tests)
 cargo test -p nullscan-core flags_explicit_any   # one test by name
-cargo run -p nullscan-cli -- path/to/src/    # analyze files/dirs
-cargo run -p nullscan-cli -- src/ --format sarif
-cargo run -p nullscan-cli -- src/ --config path/to/nullscan.toml
+cargo run -p nullscan -- path/to/src/         # analyze files/dirs
+cargo run -p nullscan -- src/ --format sarif
+cargo run -p nullscan -- src/ --format json
+cargo run -p nullscan -- src/ --config path/to/nullscan.toml
 ```
 
 There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test --workspace` is the verification step. Edition 2024 requires a recent toolchain (tested on 1.98).
@@ -31,6 +32,8 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 ## Layout and flow
 
 - `nullscan-core/` — tree-sitter parsing, the rule registry, per-file rules, cognitive complexity, cross-file duplication. No `serde` in this crate; `Config` is a plain struct.
+- `nullscan-core/src/text.rs` — source-position helpers shared by consumers that speak UTF-16, chiefly `byte_col_to_utf16(line, byte_col)`. It converts a 0-based byte column on one line into a 0-based UTF-16 code-unit column, clamping out-of-range or mid-character columns.
+- `Diagnostic` (in `nullscan-core/src/lib.rs`) carries `rule`, `severity`, `line`/`column`, `end_line`/`end_column` and `message`. Positions are 1-based byte positions; `Severity` is ordered `Error < Warning < Info` and exposes `as_str()` for text, SARIF and JSON. `rule::severity_of(rule_id)` resolves a registry id to its level and is re-exported from the crate root.
 - `nullscan-core/src/rule.rs` — **single source of truth** for rule metadata: `RuleMeta`, `RuleScope`, `Rule`, `FileContext`, and the `RULES` registry (including the project-scoped `duplicate-code`).
 - `RULES.md` — human-facing catalog, one row per registry rule: category, closest SonarJS/ESLint equivalent, and implementation status. Update it when adding a rule.
 - `nullscan-core/tests/rules.rs` + `nullscan-core/tests/fixtures/<rule-id>/` — fixture-based regression harness. It discovers fixture directories dynamically and checks `valid.ts|tsx` (zero diagnostics for that rule) and `invalid.ts|tsx` (at least one). Other rules may fire on a fixture; only the rule named by the directory is asserted. Project-scoped rules are skipped.
@@ -38,11 +41,13 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - `nullscan-core/src/control_flow.rs` — small reusable statement helpers, deliberately not a CFG: `statement_terminates`, `last_statement`/`last_executable_statement`, `statements`, `body_statements`, `is_function_like`, `is_loop`, and `collect_returns` (skipping nested functions). The reachability/dataflow rules share these instead of duplicating tree walks; termination coverage is limited to return/throw/break/continue, terminating blocks, and `if`/`else`. Unit tests for the helpers live in the module.
 - `nullscan-core/src/lang/typescript/rules/` — one module per per-file rule; each exposes `pub fn run(&FileContext) -> Vec<Diagnostic>`. Shared query helper in `query.rs`. Scope-dependent rules read `ctx.scopes` and return early when it is `None`.
 - `nullscan-core/src/cognitive_complexity.rs` and `duplication.rs` — metric and clone-detection implementations, kept at the crate root; the TypeScript rule module only wraps them.
-- `nullscan-cli/` — clap argument parsing, `nullscan.toml` loading/deserialization, file walking, output formatting (text/SARIF), exit codes.
+- `nullscan-workspace/` — everything that must behave identically in the CLI and the editor integration. `walk.rs` owns `SKIPPED_DIRS` and the recursive file collector (sorted/deduplicated files plus warnings); `config.rs` owns `nullscan.toml` loading and validation; `scan.rs` owns reading + parallel analysis + duplicate detection + the `maxDiagnostics` cap and returns a `ScanReport`; `json.rs` owns the serializable `Summary`/JSON contract (0-based UTF-16 ranges). It must stay free of `clap` and any LSP crate, and it must not depend on `nullscan-lsp`.
+- `nullscan/` — thin CLI: `clap` argument parsing, calls `nullscan_workspace::scan`, then text/SARIF/JSON formatting and exit codes. No walking, config parsing or analysis orchestration lives here.
 - `nullscan_core::analyze()` (in `lib.rs`) parses once, builds one `FileContext { tree, source, config, scopes }`, and runs every enabled `RuleScope::File` entry from `RULES` in registry order. It builds the `ScopeGraph` only when at least one enabled file rule sets `requires_scope: true`, then passes it as `ctx.scopes`; otherwise that field is `None`. The public `analyze(source, language, config)` signature is unchanged. TS and TSX share one rule set, so queries must be built with `tree.language()` rather than a hard-coded grammar.
-- Cross-file `duplicate-code` is registered in `RULES` as `RuleScope::Project` with `run: None`; the CLI orchestrates it in `find_duplicates` because it needs all sources. Rules needing whole-project context do not belong in `analyze()`.
-- The CLI's SARIF catalog and `rules.disabled` validation both read `nullscan_core::RULES`; there is no duplicate metadata list in the CLI.
-- Exit code is 1 if any diagnostic or duplicate is found, else 0. `rayon` parallel maps collect in input order, so output order stays deterministic; preserve that when touching the pipeline.
+- Cross-file `duplicate-code` is registered in `RULES` as `RuleScope::Project` with `run: None`; `nullscan-workspace::scan` orchestrates it with `find_duplicates` because it needs all sources. Rules needing whole-project context do not belong in `analyze()`.
+- The SARIF catalog (`nullscan/src/sarif.rs`) and `rules.disabled` validation (`nullscan-workspace/src/config.rs`) both read `nullscan_core::RULES`; there is no duplicate metadata list in the CLI or workspace.
+- Exit codes are `0` clean, `1` findings (diagnostics or duplicates), and `2` tool error (invalid config or no existing input path). `rayon` parallel maps collect in input order, so output order stays deterministic; preserve that when touching the workspace scan pipeline.
+- `--format json` is the machine contract used by editors: `schemaVersion: 1`, tool/config/summary/diagnostics/duplicates/warnings sections, and a trailing newline. Diagnostic ranges use 0-based lines and 0-based UTF-16 characters; duplicate spans keep core's 1-based line numbers. Warnings are part of the document, never stderr. Text and SARIF keep their existing shapes (SARIF adds `level`).
 
 ## Adding or changing a rule
 
@@ -55,7 +60,7 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - Add `nullscan-core/tests/fixtures/<rule-id>/valid.ts` (or `.tsx`) and `invalid.ts` (or `.tsx`). The fixture harness fails any file-scoped registry rule without a pair, so this is part of landing a rule, not optional cleanup. Use `.tsx` for at least one pair when the rule should be guarded under TSX.
 - Add the rule's row to `RULES.md` (category, upstream equivalent, status).
 - Entry order in `RULES` is the diagnostic-emission order for file rules. Existing tests assert exact rule vectors; insert a new rule where its diagnostics should appear rather than reordering existing ones.
-- For a new threshold, add it to `nullscan_core::Config` defaults **and** `FileThresholdsConfig` in `nullscan-cli/src/config.rs` (kebab-case `#[serde(rename = ...)]`).
+- For a new threshold, add it to `nullscan_core::Config` defaults **and** `FileThresholdsConfig` in `nullscan-workspace/src/config.rs` (kebab-case `#[serde(rename = ...)]`).
 - Structural rules with a single `@report` capture should use the shared `query_rule` helper in `rules/query.rs`. Anything that inspects captured text or child counts needs a hand-written rule.
 - **tree-sitter traps** (details and repros in `FINDINGS.md`):
   - `QueryCursor::matches` does not evaluate `#eq?`/`#match?`; filter `node.utf8_text(...)` in Rust.
@@ -68,5 +73,5 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 ## CLI/file-walking notes
 
 - Supported inputs: `.ts`, `.mts`, `.cts`, `.tsx`; JS is not supported.
-- Directory walks skip dot-directories and `SKIPPED_DIRS` (`node_modules`, `dist`, `build`, `.next`, `out`) to avoid scanning generated output.
-- Default config is `./nullscan.toml` relative to the process CWD, not the target path.
+- Directory walks (`nullscan-workspace/src/walk.rs`) skip dot-directories and `SKIPPED_DIRS` (`node_modules`, `dist`, `build`, `.next`, `out`) to avoid scanning generated output. Explicit unsupported files and missing paths become warnings; a run with no existing input path exits `2`.
+- Default config is `./nullscan.toml` relative to the process CWD, not the target path. The loader lives in `nullscan-workspace/src/config.rs`; the resolved path is reported absolute in JSON.

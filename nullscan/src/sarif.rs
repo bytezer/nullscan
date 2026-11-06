@@ -3,9 +3,10 @@
 //! annotations. Only the fields those consumers actually read are modeled — SARIF has
 //! plenty more optional structure we don't need yet.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use nullscan_core::{Diagnostic, Duplicate, RULES};
+use nullscan_core::{Duplicate, RULES, Severity};
+use nullscan_workspace::FileResult;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -39,6 +40,13 @@ struct Rule {
     id: &'static str,
     #[serde(rename = "shortDescription")]
     short_description: Text,
+    #[serde(rename = "defaultConfiguration")]
+    default_configuration: DefaultConfiguration,
+}
+
+#[derive(Serialize)]
+struct DefaultConfiguration {
+    level: &'static str,
 }
 
 #[derive(Serialize)]
@@ -50,6 +58,7 @@ struct Text {
 struct ResultEntry {
     #[serde(rename = "ruleId")]
     rule_id: String,
+    level: &'static str,
     message: MessageText,
     locations: Vec<Location>,
     #[serde(rename = "relatedLocations", skip_serializing_if = "Vec::is_empty")]
@@ -96,35 +105,46 @@ fn location(file: &Path, line: usize, column: usize) -> Location {
     }
 }
 
+/// Maps the three internal severities onto SARIF's `error`/`warning`/`note` levels.
+fn level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "note",
+    }
+}
+
 /// Renders every file's diagnostics plus the cross-file duplicates as one SARIF log.
-pub fn render(diagnostics: &[(PathBuf, Vec<Diagnostic>)], duplicates: &[Duplicate]) -> String {
+pub fn render(files: &[FileResult], duplicates: &[Duplicate]) -> String {
     let mut results = Vec::new();
 
-    for (file, file_diagnostics) in diagnostics {
-        for d in file_diagnostics {
+    for file in files {
+        for diagnostic in &file.diagnostics {
             results.push(ResultEntry {
-                rule_id: d.rule.to_string(),
-                message: MessageText { text: d.message.clone() },
-                locations: vec![location(file, d.line, d.column)],
+                rule_id: diagnostic.rule.to_string(),
+                level: level(diagnostic.severity),
+                message: MessageText { text: diagnostic.message.clone() },
+                locations: vec![location(&file.file, diagnostic.line, diagnostic.column)],
                 related_locations: Vec::new(),
             });
         }
     }
 
-    for dup in duplicates {
+    for duplicate in duplicates {
         results.push(ResultEntry {
             rule_id: "duplicate-code".to_string(),
+            level: level(nullscan_core::severity_of("duplicate-code")),
             message: MessageText {
                 text: format!(
                     "duplicated block of {} tokens, also found at {}:{}-{}",
-                    dup.token_count,
-                    dup.b.file.display(),
-                    dup.b.start_line,
-                    dup.b.end_line
+                    duplicate.token_count,
+                    duplicate.b.file.display(),
+                    duplicate.b.start_line,
+                    duplicate.b.end_line
                 ),
             },
-            locations: vec![location(&dup.a.file, dup.a.start_line, 1)],
-            related_locations: vec![location(&dup.b.file, dup.b.start_line, 1)],
+            locations: vec![location(&duplicate.a.file, duplicate.a.start_line, 1)],
+            related_locations: vec![location(&duplicate.b.file, duplicate.b.start_line, 1)],
         });
     }
 
@@ -133,6 +153,7 @@ pub fn render(diagnostics: &[(PathBuf, Vec<Diagnostic>)], duplicates: &[Duplicat
         .map(|rule| Rule {
             id: rule.meta.id,
             short_description: Text { text: rule.meta.description },
+            default_configuration: DefaultConfiguration { level: level(rule.meta.severity) },
         })
         .collect();
 

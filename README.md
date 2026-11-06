@@ -13,28 +13,39 @@ and a CLI that runs a set of rules against a `.ts` file.
 
 ```
 nullscan/
-├── nullscan-core/   # parsing (tree-sitter-typescript) + rules
-└── nullscan-cli/    # CLI (clap)
+├── nullscan-core/       # parsing (tree-sitter-typescript) + rules
+├── nullscan-workspace/  # file walking, nullscan.toml, scan orchestration, JSON contract
+└── nullscan/            # CLI (clap)
 ```
 
 ## Usage
 
 ```sh
-cargo run -p nullscan-cli -- file.ts
-cargo run -p nullscan-cli -- src/*.ts          # your shell expands the glob
-cargo run -p nullscan-cli -- src/                # walked recursively for .ts/.tsx
+cargo run -p nullscan -- file.ts
+cargo run -p nullscan -- src/*.ts          # your shell expands the glob
+cargo run -p nullscan -- src/              # walked recursively for .ts/.tsx
 ```
 
 Directory arguments are walked recursively, skipping `node_modules` and dotdirs.
-Prints one diagnostic per line (`file:line:column: [rule] message`) and exits with
-code 1 if anything was found, 0 if every file is clean.
+Prints one diagnostic per line (`file:line:column: [rule] message`). Exit codes are
+`0` clean, `1` findings (diagnostics or duplicates), and `2` tool error (invalid
+config or no existing input path).
 
 Add `--format sarif` for [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) JSON output
 instead — consumed natively by GitHub Code Scanning and editor SARIF viewers, so
 findings show up as inline PR annotations with no extra tooling:
 
 ```sh
-cargo run -p nullscan-cli -- src/ --format sarif > results.sarif
+cargo run -p nullscan -- src/ --format sarif > results.sarif
+```
+
+Add `--format json` for the machine-readable contract used by editors and CI. It is the
+stable interface: 0-based lines and 0-based UTF-16 characters, per-severity and per-rule
+summary counts, duplicate locations and warnings. See `nullscan-workspace/src/json.rs`
+for the exact shape.
+
+```sh
+cargo run -p nullscan -- src/ --format json | jq .summary
 ```
 
 ## Configuration

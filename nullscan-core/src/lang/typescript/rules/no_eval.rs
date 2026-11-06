@@ -27,7 +27,7 @@ fn walk(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
                 out.push(report_at(
                     "no-eval",
                     node,
-                    "'eval' executes arbitrary code and should not be used",
+                    "remove this 'eval' call; it executes arbitrary code",
                 ));
             }
         }

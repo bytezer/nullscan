@@ -28,7 +28,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         out.push(report_at(
             "no-explicit-any",
             report.node,
-            "unexpected 'any' type",
+            "avoid 'any'; use a specific type or 'unknown'",
         ));
     }
     out

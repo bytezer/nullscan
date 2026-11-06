@@ -52,7 +52,7 @@ fn check(conditional: Node<'_>, branches: &[Node<'_>], source: &str, out: &mut V
         out.push(report_at(
             "no-all-duplicated-branches",
             conditional,
-            "all branches have the same implementation",
+            "all branches do the same thing; keep one branch and remove the condition",
         ));
     }
 }

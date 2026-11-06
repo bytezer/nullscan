@@ -33,7 +33,7 @@ fn walk<'a>(
                 out.push(report_at(
                     "no-duplicate-imports",
                     node,
-                    format!("module {module_text} is imported more than once"),
+                    format!("module {module_text} is imported more than once; merge it with the earlier import"),
                 ));
             }
         }

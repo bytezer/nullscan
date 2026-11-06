@@ -48,7 +48,7 @@ fn check_list(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
             out.push(report_at(
                 "no-element-overwrite",
                 second,
-                "the previous assignment to the same target is overwritten without being read",
+                "remove the first assignment; this one overwrites it before it is read",
             ));
         }
     }

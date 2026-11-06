@@ -41,7 +41,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
             "no-use-before-define",
             reference.offset,
             reference.offset,
-            format!("'{}' is used before its declaration", reference.name),
+            format!("move the declaration of '{}' before this use", reference.name),
         ));
     }
     out.sort_by_key(|diagnostic| (diagnostic.line, diagnostic.column));

@@ -41,7 +41,7 @@ fn check_if_chain(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
                 out.push(report_at(
                     "no-identical-conditions",
                     condition,
-                    "this branch duplicates an earlier condition in the same if/else chain and can never run",
+                    "remove this branch: it repeats an earlier condition and can never run",
                 ));
             } else {
                 seen.push(text);

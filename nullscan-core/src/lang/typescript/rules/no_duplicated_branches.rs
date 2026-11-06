@@ -68,7 +68,7 @@ fn check(branches: &[Node<'_>], source: &str, out: &mut Vec<Diagnostic>) {
         out.push(report_at(
             "no-duplicated-branches",
             branch,
-            "this branch duplicates another branch's implementation",
+            "merge this branch with the identical one, or remove the duplicate",
         ));
     }
 }

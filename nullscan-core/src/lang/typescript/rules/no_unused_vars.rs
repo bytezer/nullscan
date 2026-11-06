@@ -43,7 +43,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                 "no-unused-vars",
                 binding.offset,
                 binding.offset,
-                format!("'{}' is declared but never used", binding.name),
+                format!("'{}' is declared but never used; remove it or use it", binding.name),
             ));
         }
     }

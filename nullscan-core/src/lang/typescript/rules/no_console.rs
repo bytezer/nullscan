@@ -34,7 +34,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         out.push(report_at(
             "no-console",
             report.node,
-            "unexpected console call",
+            "remove this console call or use the logger",
         ));
     }
     out

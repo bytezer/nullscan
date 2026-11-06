@@ -30,7 +30,7 @@ fn walk_for_collapsible_if(node: Node, source: &str, out: &mut Vec<Diagnostic>) 
                     out.push(report_at(
                         "no-collapsible-if",
                         node,
-                        "nested 'if' with no 'else' can be merged with the outer condition using '&&'",
+                        "merge this nested 'if' into the outer condition with '&&'",
                     ));
                 }
             }

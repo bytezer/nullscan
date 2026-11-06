@@ -1333,7 +1333,10 @@ mod tests {
         let value = result["contents"]["value"].as_str().expect("markdown value");
         assert!(value.contains("**no-console**"), "hover: {value}");
         assert!(value.contains("Unexpected console call"), "hover: {value}");
-        assert!(value.contains("unexpected console call"), "hover: {value}");
+        assert!(
+            value.contains("remove this console call or use the logger"),
+            "hover: {value}"
+        );
         assert_eq!(
             result["range"],
             json!({

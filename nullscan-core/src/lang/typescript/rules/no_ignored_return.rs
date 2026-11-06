@@ -59,7 +59,7 @@ fn check_statement(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "no-ignored-return",
         expression,
-        format!("return value of '{name}' is ignored"),
+        format!("use the value returned by '{name}' or remove the call"),
     ));
 }
 

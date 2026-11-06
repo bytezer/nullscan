@@ -570,7 +570,10 @@ mod tests {
         );
         let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule).collect();
         assert_eq!(rule_ids, vec!["no-unused-vars"]);
-        assert_eq!(diagnostics[0].message, "'unused' is declared but never used");
+        assert_eq!(
+            diagnostics[0].message,
+            "'unused' is declared but never used; remove it or use it"
+        );
     }
 
     #[test]
@@ -995,7 +998,7 @@ mod tests {
         let diagnostics = analyze("const apiKey = 'abcdefghijkl';", &Config::default());
         assert_eq!(
             diagnostics[0].message,
-            "possible hard-coded secret in 'apiKey'"
+            "do not hard-code secrets in 'apiKey'; load it from configuration"
         );
     }
 

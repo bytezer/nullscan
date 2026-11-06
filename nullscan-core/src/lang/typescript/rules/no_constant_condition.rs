@@ -46,7 +46,7 @@ fn report_if_constant(condition: Node<'_>, source: &str, out: &mut Vec<Diagnosti
         out.push(report_at(
             "no-constant-condition",
             condition,
-            "condition is constant and always evaluates the same way",
+            "this condition is constant; remove it or use the intended variable",
         ));
     }
 }

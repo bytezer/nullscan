@@ -26,7 +26,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                 out.push(report_at(
                     "no-empty-catch",
                     body,
-                    "empty catch block silently swallows errors",
+                    "handle the error or document why it is safe to ignore",
                 ));
             }
         }

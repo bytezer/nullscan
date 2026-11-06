@@ -21,7 +21,7 @@ fn walk(node: Node<'_>, out: &mut Vec<Diagnostic>) {
         out.push(report_at(
             "no-nested-template-literals",
             node,
-            "template literal is nested inside another template literal",
+            "extract this nested template literal into a variable",
         ));
     }
     let mut cursor = node.walk();

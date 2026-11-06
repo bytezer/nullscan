@@ -47,7 +47,7 @@ fn find_functions(node: Node, source: &str, threshold: u32, out: &mut Vec<Diagno
                     "cognitive-complexity",
                     node,
                     format!(
-                        "{label} has a cognitive complexity of {score} (threshold {threshold})"
+                        "{label} has a cognitive complexity of {score} (threshold {threshold}); split it into smaller functions"
                     ),
                 ));
             }

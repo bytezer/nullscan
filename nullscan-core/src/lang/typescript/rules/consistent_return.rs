@@ -63,7 +63,7 @@ fn check_function(node: Node<'_>, out: &mut Vec<Diagnostic>) {
         out.push(report_at(
             "consistent-return",
             node,
-            "function returns a value on some paths but not on others",
+            "return a value on every path or on none",
         ));
     }
 }

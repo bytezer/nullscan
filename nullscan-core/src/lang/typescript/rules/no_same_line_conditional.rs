@@ -26,7 +26,7 @@ fn walk(node: Node<'_>, out: &mut Vec<Diagnostic>) {
                 out.push(report_at(
                     "no-same-line-conditional",
                     node,
-                    "conditional starts on the same line as the previous statement",
+                    "put this conditional on its own line",
                 ));
             }
         }

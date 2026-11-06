@@ -47,7 +47,7 @@ fn comparison_rule(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
             out.push(report_at(
                 "no-redundant-boolean",
                 node,
-                "comparing to a boolean literal is redundant",
+                "remove the comparison to a boolean literal and use the value directly",
             ));
         }
     }

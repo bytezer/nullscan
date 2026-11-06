@@ -41,6 +41,6 @@ fn check(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "no-self-assign",
         node,
-        "this assignment assigns a value to itself",
+        "remove this assignment; it assigns a value to itself",
     ));
 }

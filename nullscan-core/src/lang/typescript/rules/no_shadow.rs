@@ -29,7 +29,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                     "no-shadow",
                     binding.offset,
                     binding.offset,
-                    format!("'{}' shadows a binding in an outer scope", binding.name),
+                    format!("rename '{}' to avoid shadowing the outer binding", binding.name),
                 ));
                 break;
             }

@@ -30,7 +30,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                     "no-redeclare",
                     binding.offset,
                     binding.offset,
-                    format!("'{}' is already declared in this scope", binding.name),
+                    format!("rename or remove the second declaration of '{}'", binding.name),
                 ));
             }
         }

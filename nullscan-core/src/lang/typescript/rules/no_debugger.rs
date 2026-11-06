@@ -7,7 +7,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     query_rule(
         ctx,
         "no-debugger",
-        "unexpected 'debugger' statement",
+        "remove this 'debugger' statement before committing",
         r#"
             (debugger_statement) @report
         "#,

@@ -180,6 +180,6 @@ fn report(node: Node<'_>, name: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "hardcoded-secrets",
         node,
-        format!("possible hard-coded secret in '{name}'"),
+        format!("do not hard-code secrets in '{name}'; load it from configuration"),
     ));
 }

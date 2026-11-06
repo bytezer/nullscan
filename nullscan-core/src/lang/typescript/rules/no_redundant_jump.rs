@@ -46,7 +46,7 @@ fn walk(node: Node<'_>, out: &mut Vec<Diagnostic>) {
                         out.push(report_at(
                             "no-redundant-jump",
                             last,
-                            "redundant 'return;' at the end of a function",
+                            "remove this redundant 'return;'; the function ends here anyway",
                         ));
                     }
                 }
@@ -69,7 +69,7 @@ fn walk(node: Node<'_>, out: &mut Vec<Diagnostic>) {
                     out.push(report_at(
                         "no-redundant-jump",
                         last,
-                        "redundant 'continue;' at the end of a loop",
+                        "remove this redundant 'continue;'; the loop ends here anyway",
                     ));
                 }
             }

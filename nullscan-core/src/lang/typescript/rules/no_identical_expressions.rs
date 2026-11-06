@@ -52,6 +52,6 @@ fn check(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "no-identical-expressions",
         node,
-        format!("both sides of '{operator}' are identical"),
+        format!("both sides of '{operator}' are the same; fix the copied operand"),
     ));
 }

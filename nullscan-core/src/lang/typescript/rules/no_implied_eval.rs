@@ -53,7 +53,7 @@ fn check_call(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "no-implied-eval",
         node,
-        format!("'{name}' called with a string is evaluated as code"),
+        format!("pass a function to '{name}' instead of a string that is evaluated as code"),
     ));
 }
 

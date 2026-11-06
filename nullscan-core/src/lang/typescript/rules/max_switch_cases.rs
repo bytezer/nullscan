@@ -26,7 +26,7 @@ fn walk(node: Node<'_>, threshold: usize, out: &mut Vec<Diagnostic>) {
                     "max-switch-cases",
                     node,
                     format!(
-                        "'switch' has {cases} 'case' clauses; the maximum is {threshold}"
+                        "'switch' has {cases} 'case' clauses; the maximum is {threshold}, so use a lookup table"
                     ),
                 ));
             }

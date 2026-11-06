@@ -39,7 +39,7 @@ fn walk_list(node: Node<'_>, out: &mut Vec<Diagnostic>) {
                 out.push(report_at(
                     "no-unreachable",
                     statement,
-                    "unreachable code after a statement that always transfers control",
+                    "remove this code; it can never run because an earlier statement always exits",
                 ));
                 reported = true;
             }

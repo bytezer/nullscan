@@ -31,7 +31,7 @@ fn walk(node: Node<'_>, out: &mut Vec<Diagnostic>) {
         out.push(report_at(
             "no-nested-switch",
             node,
-            "'switch' statement is nested inside another 'switch'",
+            "move this 'switch' into its own function or flatten the nesting",
         ));
     }
     let mut cursor = node.walk();

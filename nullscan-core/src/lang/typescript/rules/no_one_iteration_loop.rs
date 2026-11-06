@@ -40,7 +40,7 @@ fn check_loop(node: Node<'_>, out: &mut Vec<Diagnostic>) {
                 out.push(report_at(
                     "no-one-iteration-loop",
                     node,
-                    "loop body always exits on its first iteration",
+                    "replace this loop with its body; it exits on the first iteration",
                 ));
                 return;
             }

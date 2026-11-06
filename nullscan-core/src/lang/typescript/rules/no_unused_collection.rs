@@ -99,7 +99,7 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
             "no-unused-collection",
             *declarator_node,
             format!(
-                "collection '{}' is only mutated; its contents are never read",
+                "remove '{}' or read it; the collection is only mutated",
                 binding.name
             ),
         ));

@@ -58,7 +58,7 @@ fn check_binary(node: Node<'_>, source: &str, out: &mut Vec<Diagnostic>) {
     out.push(report_at(
         "no-gratuitous-expressions",
         node,
-        format!("'{operator_text}' expression is constant because {reason}"),
+        format!("simplify this condition; the '{operator_text}' expression is constant because {reason}"),
     ));
 }
 

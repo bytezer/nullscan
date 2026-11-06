@@ -29,7 +29,7 @@ use lsp_types::{
     request::{CodeActionRequest, HoverRequest, Request as _},
 };
 use nullscan_core::{Config, Language, analyze};
-use nullscan_workspace::config::load_in_dir;
+use nullscan_workspace::config;
 use nullscan_workspace::json::summary_json;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -81,6 +81,8 @@ pub struct Server {
     job_receiver: Receiver<JobResult>,
     debouncer: Debouncer,
     settings: Settings,
+    /// `--config`: one explicit `nullscan.toml` for every document and every scanned folder.
+    config_path: Option<PathBuf>,
     documents: HashMap<Uri, Document>,
     folders: Vec<PathBuf>,
     /// Everything currently published per URI, so an edit can drop only the duplicates
@@ -93,8 +95,13 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(sink: MessageSink, folders: Vec<PathBuf>, settings: Settings) -> Self {
-        Self::assemble(sink, folders, settings, Debouncer::new())
+    pub fn new(
+        sink: MessageSink,
+        folders: Vec<PathBuf>,
+        settings: Settings,
+        config_path: Option<PathBuf>,
+    ) -> Self {
+        Self::assemble(sink, folders, settings, config_path, Debouncer::new())
     }
 
     /// The debounce interval is injectable so unit tests do not wait the production 250 ms.
@@ -103,15 +110,23 @@ impl Server {
         sink: MessageSink,
         folders: Vec<PathBuf>,
         settings: Settings,
+        config_path: Option<PathBuf>,
         interval: Duration,
     ) -> Self {
-        Self::assemble(sink, folders, settings, Debouncer::with_interval(interval))
+        Self::assemble(
+            sink,
+            folders,
+            settings,
+            config_path,
+            Debouncer::with_interval(interval),
+        )
     }
 
     fn assemble(
         sink: MessageSink,
         folders: Vec<PathBuf>,
         settings: Settings,
+        config_path: Option<PathBuf>,
         debouncer: Debouncer,
     ) -> Self {
         let (job_sender, job_receiver) = unbounded();
@@ -121,6 +136,7 @@ impl Server {
             job_receiver,
             debouncer,
             settings,
+            config_path,
             documents: HashMap::new(),
             folders,
             published: HashMap::new(),
@@ -310,6 +326,9 @@ impl Server {
         if path.file_name() == Some(OsStr::new(CONFIG_FILE_NAME)) {
             return true;
         }
+        if self.config_path.as_deref() == Some(path.as_path()) {
+            return true;
+        }
         log::debug!("ignoring watched file {}", path.display());
         false
     }
@@ -378,6 +397,7 @@ impl Server {
         let job = ScanJob {
             request_id: id,
             folders,
+            config_path: self.config_path.clone(),
             overrides: self.overrides(),
             max_diagnostics: self.settings.max_diagnostics,
             include_duplicates: self.settings.include_duplicates,
@@ -531,15 +551,27 @@ impl Server {
             .collect()
     }
 
-    /// Resolves the nearest workspace folder's `nullscan.toml`, falling back to defaults.
+    /// The explicit `--config` file when set, else the nearest workspace folder's
+    /// `nullscan.toml`; both fall back to the built-in defaults.
     fn config_for(&self, uri: &Uri) -> Config {
+        if let Some(path) = &self.config_path {
+            return self.load_config(|| config::load(Some(path)));
+        }
         let Some(path) = to_file_path(uri) else {
             return Config::default();
         };
         let Some(dir) = self.config_dir(&path) else {
             return Config::default();
         };
-        match load_in_dir(dir) {
+        self.load_config(|| config::load_in_dir(dir))
+    }
+
+    /// Runs a loader, forwarding its warnings and turning an error into an empty config.
+    fn load_config<F>(&self, load: F) -> Config
+    where
+        F: FnOnce() -> Result<config::LoadedConfig, String>,
+    {
+        match load() {
             Ok(loaded) => {
                 for warning in &loaded.warnings {
                     log::warn!("{warning}");
@@ -656,11 +688,14 @@ impl Server {
 
     /// The config file that governs `document`, with its buffer or disk text.
     ///
-    /// The target is the nearest workspace folder's `nullscan.toml`; without a workspace
-    /// folder it is the document's own directory.
+    /// The target is the explicit `--config` file when set; otherwise the nearest workspace
+    /// folder's `nullscan.toml`, or the document's own directory without a workspace folder.
     fn config_document(&self, document: &Uri) -> Option<code_action::ConfigDocument> {
         let path = to_file_path(document)?;
-        let target = config_path(self.config_dir(&path)?);
+        let target = match &self.config_path {
+            Some(explicit) => explicit.clone(),
+            None => config_path(self.config_dir(&path)?),
+        };
         let uri = from_file_path(&target);
         let open = self.documents.get(&uri);
         let exists = open.is_some() || target.is_file();
@@ -759,7 +794,7 @@ fn language_for(uri: &Uri) -> Option<Language> {
 /// A broken config still resolves to its own file, so the quick fix reports the parse
 /// error instead of silently writing a second `nullscan.toml`.
 fn config_path(folder: &Path) -> PathBuf {
-    match load_in_dir(folder) {
+    match config::load_in_dir(folder) {
         Ok(loaded) => loaded
             .path
             .unwrap_or_else(|| folder.join(CONFIG_FILE_NAME)),
@@ -820,6 +855,7 @@ mod tests {
             sink,
             vec![PathBuf::from("/tmp/fixture")],
             settings,
+            None,
             interval,
         );
         (server, messages)

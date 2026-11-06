@@ -24,8 +24,14 @@ pub struct ServerProcess {
 
 impl ServerProcess {
     pub fn spawn() -> Self {
+        Self::spawn_with_args(&[])
+    }
+
+    /// Spawns `--stdio` plus extra flags such as `--config <path>`.
+    pub fn spawn_with_args(extra: &[&str]) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_nullscan-lsp"))
             .arg("--stdio")
+            .args(extra)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -15,7 +15,9 @@ and a CLI that runs a set of rules against a `.ts` file.
 nullscan/
 ├── nullscan-core/       # parsing (tree-sitter-typescript) + rules
 ├── nullscan-workspace/  # file walking, nullscan.toml, scan orchestration, JSON contract
-└── nullscan/            # CLI (clap)
+├── nullscan/            # CLI (clap)
+├── nullscan-lsp/        # language server (stdio JSON-RPC)
+└── editors/vscode/      # VS Code client and UI
 ```
 
 ## Usage
@@ -46,6 +48,23 @@ for the exact shape.
 
 ```sh
 cargo run -p nullscan -- src/ --format json | jq .summary
+```
+
+## Editor integration
+
+The VS Code extension in `editors/vscode` is a thin client for `nullscan-lsp`, a stdio
+language server built from the same crates as the CLI: it publishes diagnostics on open and
+save, offers a disable-rule quick fix, a rule hover, an issue tree and a workspace summary.
+It resolves the server from `nullscan.path`, a bundled binary, a verified download or
+`PATH`, honours `nullscan.toml` per workspace folder (or one file via `nullscan.configPath`),
+and never runs analysis itself. See `editors/vscode/README.md` for install, settings and
+limitations.
+
+The integration suite runs a real VS Code instance against a local server build:
+
+```sh
+cargo build -p nullscan-lsp
+NULLSCAN_LSP_PATH=$(pwd)/target/debug/nullscan-lsp pnpm --dir editors/vscode test:integration
 ```
 
 ## Configuration

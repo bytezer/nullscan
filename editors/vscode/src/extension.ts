@@ -14,6 +14,7 @@ import {
   serverVersionMatches,
   type BinarySource,
 } from "./binary";
+import { resolveExplicitConfigPath } from "./configPath";
 import {
   cachedServerLocation,
   downloadServer,
@@ -431,17 +432,39 @@ class NullscanExtension implements vscode.Disposable {
     }
   }
 
+  /**
+   * Server flags in a stable order: `--stdio` first, then `--config <path>` when
+   * `nullscan.configPath` is set. A missing file is only a warning; the server falls back
+   * to the default rules on its own.
+   */
+  private async serverArgs(configured: string): Promise<string[]> {
+    const resolution = resolveExplicitConfigPath(configured, firstWorkspaceFolder());
+    switch (resolution.kind) {
+      case "unset":
+        return ["--stdio"];
+      case "unresolved":
+        this.output.appendLine(
+          `Nullscan: nullscan.configPath "${resolution.configured}" is relative and there is no workspace folder to resolve it against; the server reads each folder's nullscan.toml.`,
+        );
+        return ["--stdio"];
+      case "resolved":
+        this.output.appendLine(`Nullscan: using config ${resolution.path}.`);
+        if (!(await fileExists(vscode.Uri.file(resolution.path)))) {
+          const message = `Nullscan: the config file ${resolution.path} does not exist. The language server falls back to the default rules.`;
+          this.output.appendLine(message);
+          void vscode.window.showWarningMessage(message);
+        }
+        return ["--stdio", "--config", resolution.path];
+    }
+  }
+
   private async startClient(binaryPath: string): Promise<void> {
     const settings = readSettings();
-    if (settings.configPath.length > 0) {
-      this.output.appendLine(
-        "Nullscan: nullscan.configPath is reserved and not passed to the server yet; the server reads nullscan.toml from each workspace folder.",
-      );
-    }
+    const args = await this.serverArgs(settings.configPath);
 
     const serverOptions: ServerOptions = {
       command: binaryPath,
-      args: ["--stdio"],
+      args,
       options: { cwd: firstWorkspaceFolder() },
     };
     const clientOptions: LanguageClientOptions = {

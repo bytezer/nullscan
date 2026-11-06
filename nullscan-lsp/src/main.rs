@@ -15,6 +15,7 @@ mod settings;
 mod uri;
 
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -31,10 +32,13 @@ use messages::MessageSink;
 use server::Server;
 use settings::Settings;
 
-const USAGE: &str = "usage: nullscan-lsp --stdio\n       nullscan-lsp --version";
+const USAGE: &str =
+    "usage: nullscan-lsp --stdio [--config <path>]\n       nullscan-lsp --version";
 
+#[derive(Debug, PartialEq, Eq)]
 enum Command {
-    Stdio,
+    /// Serve stdio, optionally with one explicit `nullscan.toml` for every document.
+    Stdio { config: Option<PathBuf> },
     Version,
 }
 
@@ -44,7 +48,7 @@ fn main() -> ExitCode {
             println!("nullscan-lsp {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Command::Stdio) => run_stdio(),
+        Ok(Command::Stdio { config }) => run_stdio(config),
         Err(message) => {
             eprintln!("error: {message}");
             eprintln!("{USAGE}");
@@ -53,21 +57,49 @@ fn main() -> ExitCode {
     }
 }
 
-fn parse_args(args: impl Iterator<Item = String>) -> Result<Command, String> {
-    let args: Vec<String> = args.collect();
-    match args.as_slice() {
-        [flag] if flag == "--stdio" => Ok(Command::Stdio),
-        [flag] if flag == "--version" => Ok(Command::Version),
-        [] => Err("missing required flag --stdio".to_owned()),
-        [unknown, ..] => Err(format!("unknown argument '{unknown}'")),
+/// Parses the hand-written flags; order does not matter and `--config=<path>` is the
+/// same as `--config <path>`.
+fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
+    let mut stdio = false;
+    let mut version = false;
+    let mut config = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--stdio" => stdio = true,
+            "--version" => version = true,
+            "--config" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "missing value for --config".to_owned())?;
+                config = Some(PathBuf::from(value));
+            }
+            other => {
+                let Some(value) = other.strip_prefix("--config=") else {
+                    return Err(format!("unknown argument '{other}'"));
+                };
+                if value.is_empty() {
+                    return Err("missing value for --config".to_owned());
+                }
+                config = Some(PathBuf::from(value));
+            }
+        }
     }
+
+    if version {
+        return Ok(Command::Version);
+    }
+    if !stdio {
+        return Err("missing required flag --stdio".to_owned());
+    }
+    Ok(Command::Stdio { config })
 }
 
-fn run_stdio() -> ExitCode {
+fn run_stdio(config: Option<PathBuf>) -> ExitCode {
     init_logger();
 
     let (connection, io_threads) = Connection::stdio();
-    let result = serve(&connection);
+    let result = serve(&connection, config);
     // Dropping the connection closes the writer channel before joining the I/O threads.
     drop(connection);
 
@@ -89,7 +121,7 @@ fn run_stdio() -> ExitCode {
 ///
 /// The loop waits on client messages and on finished workspace scans at the same time, so
 /// `$/cancelRequest` and edits are handled while a scan is still running.
-fn serve(connection: &Connection) -> Result<(), String> {
+fn serve(connection: &Connection, config: Option<PathBuf>) -> Result<(), String> {
     let (id, params) = connection.initialize_start().map_err(stringify)?;
     let init_params: InitializeParams = serde_json::from_value(params)
         .map_err(|error| format!("invalid initialize params: {error}"))?;
@@ -112,6 +144,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
         message_sink(connection),
         server::workspace_folders(&init_params),
         initial_settings(&init_params),
+        config,
     );
     let job_results = server.job_results();
     let debounce_results = server.debounce_results();
@@ -225,4 +258,68 @@ fn init_logger() {
 
 fn stringify(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Command, String> {
+        parse_args(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    #[test]
+    fn stdio_alone_has_no_explicit_config() {
+        assert_eq!(parse(&["--stdio"]), Ok(Command::Stdio { config: None }));
+    }
+
+    #[test]
+    fn config_accepts_the_space_form() {
+        assert_eq!(
+            parse(&["--stdio", "--config", "/tmp/custom.toml"]),
+            Ok(Command::Stdio {
+                config: Some(PathBuf::from("/tmp/custom.toml"))
+            })
+        );
+    }
+
+    #[test]
+    fn config_accepts_the_equals_form() {
+        assert_eq!(
+            parse(&["--config=/tmp/custom.toml", "--stdio"]),
+            Ok(Command::Stdio {
+                config: Some(PathBuf::from("/tmp/custom.toml"))
+            })
+        );
+    }
+
+    #[test]
+    fn config_without_a_value_is_an_error() {
+        assert_eq!(
+            parse(&["--stdio", "--config"]),
+            Err("missing value for --config".to_owned())
+        );
+        assert_eq!(
+            parse(&["--stdio", "--config="]),
+            Err("missing value for --config".to_owned())
+        );
+    }
+
+    #[test]
+    fn unknown_flags_are_an_error() {
+        assert_eq!(
+            parse(&["--stdio", "--verbose"]),
+            Err("unknown argument '--verbose'".to_owned())
+        );
+    }
+
+    #[test]
+    fn stdio_is_required_unless_version_is_asked_for() {
+        assert_eq!(
+            parse(&["--config", "/tmp/custom.toml"]),
+            Err("missing required flag --stdio".to_owned())
+        );
+        assert_eq!(parse(&[]), Err("missing required flag --stdio".to_owned()));
+        assert_eq!(parse(&["--version"]), Ok(Command::Version));
+    }
 }

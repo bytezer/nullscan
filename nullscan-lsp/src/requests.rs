@@ -37,6 +37,8 @@ pub struct AnalyzeWorkspaceParams {
 pub struct ScanJob {
     pub request_id: RequestId,
     pub folders: Vec<PathBuf>,
+    /// `--config`: every folder is scanned with this file instead of its own `nullscan.toml`.
+    pub config_path: Option<PathBuf>,
     pub overrides: HashMap<PathBuf, String>,
     pub max_diagnostics: usize,
     pub include_duplicates: bool,
@@ -95,10 +97,15 @@ fn scan_folder(job: &ScanJob, folder: &Path) -> ScanReport {
     })
 }
 
-/// A broken `nullscan.toml` is reported and the folder is scanned with defaults, so one
-/// bad file never hides every diagnostic of a workspace.
+/// An explicit `--config` wins over the folder's own file. A broken or missing config is
+/// reported and the folder is scanned with defaults, so one bad file never hides every
+/// diagnostic of a workspace.
 fn folder_config(job: &ScanJob, folder: &Path) -> (Config, Option<PathBuf>) {
-    match config::load_in_dir(folder) {
+    let loaded = match &job.config_path {
+        Some(path) => config::load(Some(path)),
+        None => config::load_in_dir(folder),
+    };
+    match loaded {
         Ok(loaded) => {
             for warning in &loaded.warnings {
                 log_message(&job.sink, MessageType::WARNING, warning);

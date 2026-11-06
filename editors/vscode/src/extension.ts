@@ -7,6 +7,7 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
+import type { Issue } from "./aggregate";
 import {
   parseServerVersion,
   resolveServerBinary,
@@ -22,12 +23,13 @@ import {
 import { readSettings } from "./settings";
 import {
   StatusBar,
-  describeSummary,
   formatScanResult,
-  refreshStatusBar,
   requestSummary,
   type SummaryPayload,
+  type SummaryResponse,
 } from "./summary";
+import { IssuesController } from "./tree";
+import { SummaryPanel, resolveConfigPath, type SummaryViewState } from "./webview";
 
 const VERSION_TIMEOUT_MS = 5000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -38,7 +40,6 @@ const SHOW_OUTPUT = "Show Output";
 const RETRY = "Retry";
 const RESTART_SERVER = "Restart Server";
 const DOWNLOAD_TITLE = "Downloading nullscan server…";
-const ANALYZE_WORKSPACE = "Analyze Workspace";
 const CREATE_CONFIG = "Create";
 
 let activeExtension: NullscanExtension | undefined;
@@ -65,6 +66,9 @@ class NullscanExtension implements vscode.Disposable {
   private downloadController: AbortController | undefined;
   private disposed = false;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly summaryPanel: SummaryPanel;
+  private readonly issues: IssuesController;
+  private cachedSummary: SummaryResponse = { summary: null, stale: true };
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -72,11 +76,18 @@ class NullscanExtension implements vscode.Disposable {
     private readonly trace: vscode.LogOutputChannel,
     private readonly statusBar: StatusBar,
   ) {
+    this.summaryPanel = new SummaryPanel({
+      rescan: () => this.analyzeWorkspace(),
+      openConfig: () => this.openConfig(),
+    });
+    this.issues = new IssuesController((issues) => this.onIssuesChanged(issues));
     this.disposables.push(...this.registerCommands());
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((event) => {
         void this.onConfigurationChanged(event);
       }),
+      this.summaryPanel,
+      this.issues,
     );
   }
 
@@ -340,12 +351,13 @@ class NullscanExtension implements vscode.Disposable {
   }
 
   private registerCommands(): vscode.Disposable[] {
-    const commands: Array<[string, () => Promise<void>]> = [
+    const commands: Array<[string, () => unknown]> = [
       ["nullscan.analyzeWorkspace", () => this.analyzeWorkspace()],
       ["nullscan.showSummary", () => this.showSummary()],
       ["nullscan.openConfig", () => this.openConfig()],
       ["nullscan.redownloadServer", () => this.redownloadServer()],
       ["nullscan.restartServer", () => this.restartServer()],
+      ["nullscan.refreshIssues", () => this.issues.refresh()],
     ];
     return commands.map(([id, run]) => vscode.commands.registerCommand(id, run));
   }
@@ -466,7 +478,9 @@ class NullscanExtension implements vscode.Disposable {
       return;
     }
     try {
-      await refreshStatusBar(this.client, this.statusBar);
+      this.cachedSummary = await requestSummary(this.client);
+      this.statusBar.setSummary(this.cachedSummary.summary);
+      this.summaryPanel.update(this.summaryState(this.issues.current()));
     } catch (error) {
       this.output.appendLine(
         `Nullscan: could not read the cached summary: ${messageOf(error)}`,
@@ -495,7 +509,10 @@ class NullscanExtension implements vscode.Disposable {
           return client.sendRequest<SummaryPayload>("nullscan/analyzeWorkspace", {}, token);
         },
       );
+      this.cachedSummary = { summary, stale: false };
       this.statusBar.setSummary(summary);
+      this.issues.refresh();
+      this.summaryPanel.update(this.summaryState(this.issues.current()));
       void vscode.window.showInformationMessage(formatScanResult(summary));
     } catch (error) {
       if (cancelled) {
@@ -508,31 +525,22 @@ class NullscanExtension implements vscode.Disposable {
   }
 
   private async showSummary(): Promise<void> {
-    const client = this.requireClient();
-    if (client === undefined) {
-      return;
-    }
+    await this.refresh();
+    this.summaryPanel.show(this.summaryState(this.issues.current()));
+  }
 
-    try {
-      const response = await requestSummary(client);
-      this.statusBar.setSummary(response.summary);
-      if (response.summary === null) {
-        void vscode.window.showInformationMessage(
-          'Nullscan: no workspace scan has run yet. Run "Nullscan: Analyze Workspace" first.',
-        );
-        return;
-      }
-      const action = await vscode.window.showInformationMessage(
-        describeSummary(response.summary, response.stale),
-        { modal: true },
-        ANALYZE_WORKSPACE,
-      );
-      if (action === ANALYZE_WORKSPACE) {
-        await vscode.commands.executeCommand("nullscan.analyzeWorkspace");
-      }
-    } catch (error) {
-      this.reportError("could not read the summary", error);
-    }
+  private onIssuesChanged(issues: readonly Issue[]): void {
+    this.statusBar.setIssues(issues);
+    this.summaryPanel.update(this.summaryState(issues));
+  }
+
+  private summaryState(issues: readonly Issue[]): SummaryViewState {
+    return {
+      issues,
+      summary: this.cachedSummary.summary,
+      stale: this.cachedSummary.stale,
+      configPath: resolveConfigPath(),
+    };
   }
 
   private async openConfig(): Promise<void> {
@@ -600,7 +608,7 @@ class NullscanExtension implements vscode.Disposable {
         await this.client.sendNotification("workspace/didChangeConfiguration", {
           settings: { nullscan: settings },
         });
-        await refreshStatusBar(this.client, this.statusBar);
+        await this.refresh();
       } catch (error) {
         this.reportError("could not apply the new settings", error);
       }

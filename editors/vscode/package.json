@@ -42,6 +42,12 @@
         "category": "Nullscan"
       },
       {
+        "command": "nullscan.refreshIssues",
+        "title": "Refresh Issues",
+        "category": "Nullscan",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "nullscan.openConfig",
         "title": "Open Config",
         "category": "Nullscan"
@@ -57,6 +63,51 @@
         "category": "Nullscan"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "nullscan",
+          "title": "Nullscan",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "nullscan": [
+        {
+          "id": "nullscan.byRule",
+          "name": "By Rule"
+        },
+        {
+          "id": "nullscan.byFile",
+          "name": "By File"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "nullscan.byRule",
+        "contents": "No issues found.\n[Run Analyze workspace](command:nullscan.analyzeWorkspace)"
+      },
+      {
+        "view": "nullscan.byFile",
+        "contents": "No issues found.\n[Run Analyze workspace](command:nullscan.analyzeWorkspace)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "nullscan.refreshIssues",
+          "when": "view == nullscan.byRule",
+          "group": "navigation"
+        },
+        {
+          "command": "nullscan.refreshIssues",
+          "when": "view == nullscan.byFile",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Nullscan",
       "properties": {

@@ -1,6 +1,15 @@
 import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 
+import {
+  groupByFile,
+  severityLevelOf,
+  severityTotals,
+  type Issue,
+  type SeverityLevel,
+  type SeverityTotals,
+} from "./aggregate";
+
 /** The `summary` object shared by `--format json` and both custom LSP requests. */
 export interface SummaryPayload {
   filesScanned: number;
@@ -18,24 +27,9 @@ export interface SummaryResponse {
   stale: boolean;
 }
 
-export type SeverityLevel = "error" | "warning" | "info" | "clean";
-
 export function issueCount(summary: SummaryPayload): number {
   const severity = summary.bySeverity;
   return severity.error + severity.warning + severity.info;
-}
-
-export function highestSeverity(summary: SummaryPayload): SeverityLevel {
-  if (summary.bySeverity.error > 0) {
-    return "error";
-  }
-  if (summary.bySeverity.warning > 0) {
-    return "warning";
-  }
-  if (summary.bySeverity.info > 0) {
-    return "info";
-  }
-  return "clean";
 }
 
 export function formatIssueCount(count: number): string {
@@ -50,40 +44,20 @@ export function formatScanResult(summary: SummaryPayload): string {
   )}, ${duplicates} (${formatDuration(summary.durationMs)}).`;
 }
 
-export function describeSummary(summary: SummaryPayload, stale: boolean): string {
-  const severity = summary.bySeverity;
-  const lines = [
-    `Files scanned: ${summary.filesScanned} (${summary.filesWithIssues} with issues)`,
-    `Issues: ${issueCount(summary)} (${severity.error} errors, ${severity.warning} warnings, ${severity.info} infos)`,
-    `Duplicates: ${summary.duplicates}`,
-    `Duration: ${formatDuration(summary.durationMs)}`,
-  ];
-  if (summary.truncated) {
-    lines.push("Results were truncated by nullscan.maxDiagnostics.");
-  }
-  if (stale) {
-    lines.push("The workspace changed since this scan; run it again for fresh numbers.");
-  }
-  return lines.join("\n");
-}
-
 /** Asks the server for the cached summary; never triggers a scan. */
 export async function requestSummary(client: LanguageClient): Promise<SummaryResponse> {
   return client.sendRequest<SummaryResponse>("nullscan/summary");
 }
 
-/** Reads the cached summary and mirrors it in the status bar. */
-export async function refreshStatusBar(
-  client: LanguageClient,
-  statusBar: StatusBar,
-): Promise<void> {
-  const response = await requestSummary(client);
-  statusBar.setSummary(response.summary);
-}
-
-/** Status bar item that shows the last summary and opens `nullscan.showSummary` on click. */
+/**
+ * Status bar item that shows the diagnostics VS Code currently holds and falls
+ * back to the cached scan summary before the first publication.
+ */
 export class StatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
+  private totals: SeverityTotals | undefined;
+  private filesWithIssues = 0;
+  private scan: SummaryPayload | null | undefined;
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -102,16 +76,17 @@ export class StatusBar implements vscode.Disposable {
     }
   }
 
+  /** Workspace-scan numbers from the server; complements the diagnostics snapshot. */
   setSummary(summary: SummaryPayload | null): void {
-    if (summary === null) {
-      this.item.text = "$(shield) Nullscan";
-      this.item.tooltip = "Nullscan: no workspace scan has run yet.";
-      this.item.backgroundColor = undefined;
-      return;
-    }
-    this.item.text = `$(shield) Nullscan: ${formatIssueCount(issueCount(summary))}`;
-    this.item.tooltip = summaryTooltip(summary);
-    this.item.backgroundColor = backgroundFor(highestSeverity(summary));
+    this.scan = summary;
+    this.render();
+  }
+
+  /** Aggregated diagnostics; keeps the bar correct as open buffers change. */
+  setIssues(issues: readonly Issue[]): void {
+    this.totals = severityTotals(issues);
+    this.filesWithIssues = groupByFile(issues).length;
+    this.render();
   }
 
   setUnavailable(message: string): void {
@@ -122,6 +97,50 @@ export class StatusBar implements vscode.Disposable {
 
   dispose(): void {
     this.item.dispose();
+  }
+
+  private render(): void {
+    const totals = this.totals;
+    if (totals === undefined) {
+      this.renderScan();
+      return;
+    }
+    const total = totals.error + totals.warning + totals.info;
+    this.item.text = `$(shield) Nullscan: ${formatIssueCount(total)}`;
+    this.item.tooltip = this.issueTooltip(totals, total);
+    this.item.backgroundColor = backgroundFor(severityLevelOf(totals));
+  }
+
+  private renderScan(): void {
+    const summary = this.scan;
+    if (summary === undefined || summary === null) {
+      this.item.text = "$(shield) Nullscan";
+      this.item.tooltip = "Nullscan: no workspace scan has run yet.";
+      this.item.backgroundColor = undefined;
+      return;
+    }
+    this.item.text = `$(shield) Nullscan: ${formatIssueCount(issueCount(summary))}`;
+    this.item.tooltip = summaryTooltip(summary);
+    this.item.backgroundColor = backgroundFor(severityLevelOf(summary.bySeverity));
+  }
+
+  private issueTooltip(totals: SeverityTotals, total: number): vscode.MarkdownString {
+    const tooltip = new vscode.MarkdownString();
+    tooltip.appendMarkdown("**Nullscan**\n\n");
+    tooltip.appendMarkdown(
+      `${formatIssueCount(total)} in ${formatFileCount(this.filesWithIssues)}: ${totals.error} errors, ${totals.warning} warnings, ${totals.info} infos\n\n`,
+    );
+    const scan = this.scan;
+    if (scan !== undefined && scan !== null) {
+      tooltip.appendMarkdown(
+        `${scan.filesScanned} files scanned, ${formatDuplicateCount(scan.duplicates)}, ${formatDuration(scan.durationMs)}\n\n`,
+      );
+      if (scan.truncated) {
+        tooltip.appendMarkdown("Results truncated by `nullscan.maxDiagnostics`.\n\n");
+      }
+    }
+    tooltip.appendMarkdown("Click to show the summary.");
+    return tooltip;
   }
 }
 
@@ -161,6 +180,10 @@ function formatDuplicateCount(count: number): string {
   return count === 1 ? "1 duplicate" : `${count} duplicates`;
 }
 
-function formatDuration(durationMs: number): string {
+function formatFileCount(count: number): string {
+  return count === 1 ? "1 file" : `${count} files`;
+}
+
+export function formatDuration(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)} s`;
 }

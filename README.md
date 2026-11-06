@@ -109,11 +109,18 @@ ignore = ["tests/**", "**/*.test.ts", "src/generated/**"]
 # Still analyzed for rules, but excluded from clone detection.
 [duplicates]
 ignore = ["tests/mocks/**", "**/__fixtures__/**"]
+compare-markup = false           # default: false
 ```
 
 An unknown name in `disabled` prints a warning (likely a typo) but doesn't fail the
 run. Disabling `duplicate-code` skips that pass entirely rather than just hiding its
 output, since it's the most expensive rule to compute.
+
+Duplicate detection counts executable logic. JSX markup — tags, attributes, attribute
+strings, text, static JSX and `<svg>` contents — is data and does not count, so two
+components that only share an icon are not clones; logic inside `{...}` expressions
+still counts. Set `compare-markup = true` to restore the older behavior that compared
+markup tokens too.
 
 Ignore patterns are relative to the directory that contains `nullscan.toml` (or the
 working directory when there is no config file). `*` and `?` stay inside one path

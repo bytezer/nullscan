@@ -570,4 +570,59 @@ mod tests {
         assert!(filtered.duplicates.is_empty());
         let _ = fs::remove_dir_all(root);
     }
+
+    /// A static inline SVG icon well over the 30-token threshold. Every `d` value differs
+    /// between files, so only the shared markup can make the two components look alike.
+    fn svg_component(paths: [&str; 4]) -> String {
+        format!(
+            r#"export const icon = (
+  <svg width="800px" height="800px" viewBox="0 0 32 32" id="svg5" version="1.1" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <path d="{}" />
+    <path d="{}" />
+    <path d="{}" />
+    <path d="{}" />
+  </svg>
+);
+"#,
+            paths[0], paths[1], paths[2], paths[3]
+        )
+    }
+
+    #[test]
+    fn compare_markup_config_controls_clone_detection() {
+        let root = temp_dir("compare-markup");
+        fs::write(
+            root.join("a.tsx"),
+            svg_component(["M1 1h2v2H1z", "M4 4h2v2H4z", "M7 7h2v2H7z", "M10 10h2v2h-2z"]),
+        )
+        .expect("write a.tsx");
+        fs::write(
+            root.join("b.tsx"),
+            svg_component(["M9 9h3v3H9z", "M12 12h3v3h-3z", "M15 15h3v3h-3z", "M18 18h3v3h-3z"]),
+        )
+        .expect("write b.tsx");
+        fs::write(
+            root.join("nullscan.toml"),
+            "[duplicates]\nignore = [\"**/__fixtures__/**\"]\n",
+        )
+        .expect("write default config");
+
+        let defaults = crate::config::load_in_dir(&root).expect("default config");
+        assert!(!defaults.config.duplicates_compare_markup);
+        let without_markup = scan(options(&[root.clone()], defaults.config, None));
+        assert_eq!(without_markup.files.len(), 2);
+        assert!(without_markup.duplicates.is_empty());
+
+        fs::write(
+            root.join("nullscan.toml"),
+            "[duplicates]\ncompare-markup = true\n",
+        )
+        .expect("write markup config");
+        let with_markup_config = crate::config::load_in_dir(&root).expect("markup config");
+        assert!(with_markup_config.config.duplicates_compare_markup);
+        let with_markup = scan(options(&[root.clone()], with_markup_config.config, None));
+        assert_eq!(with_markup.files.len(), 2);
+        assert!(!with_markup.duplicates.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
 }

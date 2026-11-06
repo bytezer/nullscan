@@ -17,7 +17,7 @@ struct FileConfig {
     rules: Option<FileRulesConfig>,
     thresholds: Option<FileThresholdsConfig>,
     files: Option<FileIgnoreConfig>,
-    duplicates: Option<FileIgnoreConfig>,
+    duplicates: Option<FileDuplicatesConfig>,
 }
 
 #[derive(Deserialize, Default)]
@@ -28,6 +28,13 @@ struct FileRulesConfig {
 #[derive(Deserialize, Default)]
 struct FileIgnoreConfig {
     ignore: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Default)]
+struct FileDuplicatesConfig {
+    ignore: Option<Vec<String>>,
+    #[serde(rename = "compare-markup")]
+    compare_markup: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -97,6 +104,7 @@ fn load_file(path: &Path) -> Result<LoadedConfig, String> {
     let mut warnings = Vec::new();
     apply_rules(&file_config, &mut config, path, &mut warnings);
     apply_thresholds(&file_config, &mut config);
+    apply_duplicates(&file_config, &mut config);
 
     let ignore_patterns = file_config
         .files
@@ -206,6 +214,15 @@ fn apply_thresholds(file_config: &FileConfig, config: &mut Config) {
     }
     if let Some(value) = thresholds.no_small_switch_min_cases {
         config.no_small_switch_min_cases = value;
+    }
+}
+
+fn apply_duplicates(file_config: &FileConfig, config: &mut Config) {
+    let Some(duplicates) = &file_config.duplicates else {
+        return;
+    };
+    if let Some(value) = duplicates.compare_markup {
+        config.duplicates_compare_markup = value;
     }
 }
 
@@ -399,6 +416,72 @@ mod tests {
         assert!(loaded.duplicates_ignore.is_empty());
         assert!(!loaded.ignore.matches(&path));
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn compare_markup_defaults_to_false() {
+        let path = temp_file("compare-markup-default", "[duplicates]\nignore = []\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(!loaded.config.duplicates_compare_markup);
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn compare_markup_can_be_enabled() {
+        let path = temp_file("compare-markup-true", "[duplicates]\ncompare-markup = true\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.config.duplicates_compare_markup);
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn compare_markup_can_be_disabled_explicitly() {
+        let path = temp_file("compare-markup-false", "[duplicates]\ncompare-markup = false\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(!loaded.config.duplicates_compare_markup);
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn wrong_compare_markup_type_is_a_config_error() {
+        let path = temp_file(
+            "compare-markup-wrong-type",
+            "[duplicates]\ncompare-markup = \"yes\"\n",
+        );
+
+        let Err(error) = load(Some(&path)) else {
+            panic!("wrong compare-markup type must fail");
+        };
+
+        assert!(error.starts_with(&format!("invalid config file {}:", path.display())));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn duplicate_ignore_and_compare_markup_coexist() {
+        let path = temp_file(
+            "duplicates-coexist",
+            r#"
+            [duplicates]
+            ignore = ["tests/mocks/**"]
+            compare-markup = true
+            "#,
+        );
+        let root = path.parent().expect("parent").to_path_buf();
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.warnings.is_empty());
+        assert!(loaded.config.duplicates_compare_markup);
+        assert!(loaded.duplicates_ignore.matches(&root.join("tests/mocks/a.ts")));
+        assert!(!loaded.duplicates_ignore.matches(&root.join("tests/a.ts")));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

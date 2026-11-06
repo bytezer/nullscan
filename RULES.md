@@ -59,7 +59,7 @@ equivalent exists, the cell says so rather than guessing an ID. Category values 
 | `no-new-func` | security | ESLint `no-new-func`; no direct SonarJS equivalent | Implemented (file-scoped; bare and common global/member forms) |
 | `no-script-url` | security | ESLint `no-script-url`; no direct SonarJS equivalent | Implemented (file-scoped; string and substitution-free template literals) |
 | `hardcoded-secrets` | security | SonarJS S6418 (hard-coded secrets); no ESLint core equivalent | Implemented (file-scoped; name/value heuristic, not a secret scanner) |
-| `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI) |
+| `duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI; executable logic only, JSX markup opt-in via `[duplicates].compare-markup`) |
 
 ### Conservative limits
 

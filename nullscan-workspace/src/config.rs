@@ -78,6 +78,23 @@ pub fn load(explicit_path: Option<&Path>) -> Result<LoadedConfig, String> {
     })
 }
 
+/// Loads `dir/nullscan.toml` when it exists, else the built-in defaults.
+///
+/// This is the editor-facing entry point: every workspace folder resolves its own config
+/// without depending on the process working directory. A missing file is not an error.
+pub fn load_in_dir(dir: &Path) -> Result<LoadedConfig, String> {
+    let candidate = dir.join("nullscan.toml");
+    if candidate.is_file() {
+        return load(Some(&candidate));
+    }
+
+    Ok(LoadedConfig {
+        config: Config::default(),
+        path: None,
+        warnings: Vec::new(),
+    })
+}
+
 fn resolve_path(explicit_path: Option<&Path>) -> Option<PathBuf> {
     match explicit_path {
         Some(path) => Some(path.to_path_buf()),
@@ -162,6 +179,16 @@ mod tests {
         path
     }
 
+    fn temp_dir(label: &str) -> PathBuf {
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "nullscan-config-dir-{label}-{}-{id}",
+            process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
     #[test]
     fn defaults_when_no_file_is_loaded() {
         let loaded = load(None).expect("defaults load");
@@ -237,5 +264,38 @@ mod tests {
         };
 
         assert!(error.starts_with(&format!("could not read {}:", path.display())));
+    }
+
+    #[test]
+    fn load_in_dir_uses_the_folder_file() {
+        let dir = temp_dir("workspace");
+        fs::write(
+            dir.join("nullscan.toml"),
+            "[rules]\ndisabled = [\"no-console\"]\n",
+        )
+        .expect("write config");
+
+        let loaded = load_in_dir(&dir).expect("load folder config");
+
+        assert_eq!(
+            loaded.path,
+            Some(dir.join("nullscan.toml").canonicalize().expect("canonicalize"))
+        );
+        assert!(!loaded.config.rule_enabled("no-console"));
+        assert!(loaded.warnings.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_in_dir_without_file_returns_defaults() {
+        let dir = temp_dir("empty");
+
+        let loaded = load_in_dir(&dir).expect("defaults load");
+
+        assert!(loaded.path.is_none());
+        assert!(loaded.warnings.is_empty());
+        assert!(loaded.config.rule_enabled("no-console"));
+        assert_eq!(loaded.config.cognitive_complexity_threshold, 15);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

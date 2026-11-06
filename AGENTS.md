@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`nullscan` is a Rust workspace for a TypeScript static analyzer: a reusable core crate, a shared workspace crate, and a CLI. Read `README.md` for usage and `FINDINGS.md` for the full tree-sitter investigation notes.
+`nullscan` is a Rust workspace for a TypeScript static analyzer: a reusable core crate, a shared workspace crate, a CLI, and an LSP server. Read `README.md` for usage and `FINDINGS.md` for the full tree-sitter investigation notes.
 
 ## Commands
 
@@ -43,6 +43,9 @@ There is no CI workflow, rustfmt/clippy config, or pre-commit hook; `cargo test 
 - `nullscan-core/src/cognitive_complexity.rs` and `duplication.rs` — metric and clone-detection implementations, kept at the crate root; the TypeScript rule module only wraps them.
 - `nullscan-workspace/` — everything that must behave identically in the CLI and the editor integration. `walk.rs` owns `SKIPPED_DIRS` and the recursive file collector (sorted/deduplicated files plus warnings); `config.rs` owns `nullscan.toml` loading and validation; `scan.rs` owns reading + parallel analysis + duplicate detection + the `maxDiagnostics` cap and returns a `ScanReport`; `json.rs` owns the serializable `Summary`/JSON contract (0-based UTF-16 ranges). It must stay free of `clap` and any LSP crate, and it must not depend on `nullscan-lsp`.
 - `nullscan/` — thin CLI: `clap` argument parsing, calls `nullscan_workspace::scan`, then text/SARIF/JSON formatting and exit codes. No walking, config parsing or analysis orchestration lives here.
+- `nullscan-lsp/` — `bin nullscan-lsp`: the stdio JSON-RPC transport and argument parsing (`main.rs`), the open-document store and notification handlers (`server.rs`), core→LSP diagnostic mapping with UTF-16 ranges (`convert.rs`), and `file:` URI→path conversion (`uri.rs`). It owns the LSP transport and buffer overlays; `nullscan` must never depend on it and it must not depend on `nullscan` or `clap`.
+- Diagnostics are pushed on `didOpen`/`didSave` with full text sync, `positionEncoding: utf-16`, `source: "nullscan"` and the rule id as `code`; `didChange` only refreshes the stored buffer for now. Every log line goes to stderr because stdout is the JSON-RPC channel.
+- Config comes from each workspace folder's `nullscan.toml` via `nullscan_workspace::config::load_in_dir`; a broken file logs `window/logMessage` and falls back to defaults instead of failing the server.
 - `nullscan_core::analyze()` (in `lib.rs`) parses once, builds one `FileContext { tree, source, config, scopes }`, and runs every enabled `RuleScope::File` entry from `RULES` in registry order. It builds the `ScopeGraph` only when at least one enabled file rule sets `requires_scope: true`, then passes it as `ctx.scopes`; otherwise that field is `None`. The public `analyze(source, language, config)` signature is unchanged. TS and TSX share one rule set, so queries must be built with `tree.language()` rather than a hard-coded grammar.
 - Cross-file `duplicate-code` is registered in `RULES` as `RuleScope::Project` with `run: None`; `nullscan-workspace::scan` orchestrates it with `find_duplicates` because it needs all sources. Rules needing whole-project context do not belong in `analyze()`.
 - The SARIF catalog (`nullscan/src/sarif.rs`) and `rules.disabled` validation (`nullscan-workspace/src/config.rs`) both read `nullscan_core::RULES`; there is no duplicate metadata list in the CLI or workspace.

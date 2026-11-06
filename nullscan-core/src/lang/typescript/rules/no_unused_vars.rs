@@ -13,6 +13,8 @@
 use crate::rule::FileContext;
 use crate::{BindingKind, Diagnostic, ScopeKind};
 
+use super::report_at_range;
+
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     let Some(scopes) = ctx.scopes else {
         return Vec::new();
@@ -36,12 +38,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         };
 
         if report {
-            out.push(Diagnostic {
-                rule: "no-unused-vars",
-                line: binding.line,
-                column: binding.column,
-                message: format!("'{}' is declared but never used", binding.name),
-            });
+            out.extend(report_at_range(
+                ctx,
+                "no-unused-vars",
+                binding.offset,
+                binding.offset,
+                format!("'{}' is declared but never used", binding.name),
+            ));
         }
     }
     out.sort_by_key(|diagnostic| (diagnostic.line, diagnostic.column));

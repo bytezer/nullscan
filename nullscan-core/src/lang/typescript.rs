@@ -79,6 +79,32 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_carry_severity_and_node_end_position() {
+        let diagnostics = analyze("console.log('hi');", &Config::default());
+        assert_eq!(diagnostics[0].severity, crate::Severity::Info);
+        assert_eq!((diagnostics[0].line, diagnostics[0].column), (1, 1));
+        assert_eq!((diagnostics[0].end_line, diagnostics[0].end_column), (1, 18));
+
+        let eqeqeq = analyze("if (a == b) {}", &Config::default());
+        assert_eq!(eqeqeq[0].severity, crate::Severity::Warning);
+
+        let insecure = analyze("eval(code);", &Config::default());
+        assert_eq!(insecure[0].severity, crate::Severity::Error);
+    }
+
+    #[test]
+    fn scope_diagnostics_keep_their_identifier_range() {
+        let source = "function f() { const value = 1; { const value = 2; use(value); } return value; }";
+        let diagnostics = analyze(source, &Config::default());
+        let shadow = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.rule == "no-shadow")
+            .expect("no-shadow should fire");
+        assert_eq!((shadow.line, shadow.column), (1, 41));
+        assert_eq!((shadow.end_line, shadow.end_column), (1, 46));
+    }
+
+    #[test]
     fn flags_string_duplicated_three_times() {
         // Only the 3rd+ occurrence is flagged — the first two uses of a string aren't
         // yet a pattern worth extracting into a constant.

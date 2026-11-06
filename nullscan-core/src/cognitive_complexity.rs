@@ -9,6 +9,7 @@
 use tree_sitter::{Node, Tree};
 
 use crate::Diagnostic;
+use crate::lang::typescript::rules::report_at;
 
 pub fn cognitive_complexity_rule(tree: &Tree, source: &str, threshold: u32) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -41,16 +42,14 @@ fn find_functions(node: Node, source: &str, threshold: u32, out: &mut Vec<Diagno
         if let Some(body) = node.child_by_field_name("body") {
             let score = score(body, 0, source);
             if score > threshold {
-                let start = node.start_position();
                 let label = function_label(node, source);
-                out.push(Diagnostic {
-                    rule: "cognitive-complexity",
-                    line: start.row + 1,
-                    column: start.column + 1,
-                    message: format!(
+                out.push(report_at(
+                    "cognitive-complexity",
+                    node,
+                    format!(
                         "{label} has a cognitive complexity of {score} (threshold {threshold})"
                     ),
-                });
+                ));
             }
         }
     }

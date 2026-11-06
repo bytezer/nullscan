@@ -1,7 +1,7 @@
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use crate::Diagnostic;
-use crate::rule::FileContext;
+use crate::rule::{FileContext, severity_of};
 
 /// Source text for a node. Invalid UTF-8 only happens for malformed source, so an empty
 /// string is a safe fallback and keeps the text-sensitive rules from panicking.
@@ -49,19 +49,46 @@ pub(crate) fn named_children_without_comments<'tree>(node: Node<'tree>) -> Vec<N
         .collect()
 }
 
-/// Builds a diagnostic at a node's 1-based start position.
+/// Builds a diagnostic covering a node's full 1-based byte range.
+///
+/// This is the single place that stamps the level and end position, so no rule can forget
+/// them.
 pub(crate) fn report_at(
     rule: &'static str,
     node: Node<'_>,
     message: impl Into<String>,
 ) -> Diagnostic {
     let start = node.start_position();
+    let end = node.end_position();
     Diagnostic {
         rule,
+        severity: severity_of(rule),
         line: start.row + 1,
         column: start.column + 1,
+        end_line: end.row + 1,
+        end_column: end.column + 1,
         message: message.into(),
     }
+}
+
+/// Builds a diagnostic for a byte range stored outside the tree, such as the offsets kept
+/// in the scope graph.
+///
+/// The range is resolved back to the smallest node covering it so the diagnostic still
+/// carries a real end position. Returns `None` if the range is not inside the tree, which
+/// cannot happen when the graph and the tree come from the same source.
+pub(crate) fn report_at_range(
+    ctx: &FileContext<'_>,
+    rule: &'static str,
+    start_byte: usize,
+    end_byte: usize,
+    message: impl Into<String>,
+) -> Option<Diagnostic> {
+    let node = ctx
+        .tree
+        .root_node()
+        .descendant_for_byte_range(start_byte, end_byte)?;
+    Some(report_at(rule, node, message))
 }
 
 /// Runs a tree-sitter query and reports one diagnostic per match at the `@report` capture.
@@ -82,13 +109,7 @@ pub(crate) fn query_rule(
     let mut out = Vec::new();
     while let Some(m) = matches.next() {
         if let Some(capture) = m.captures().iter().find(|c| c.index == report_idx) {
-            let start = capture.node.start_position();
-            out.push(Diagnostic {
-                rule,
-                line: start.row + 1,
-                column: start.column + 1,
-                message: message.to_string(),
-            });
+            out.push(report_at(rule, capture.node, message));
         }
     }
     out

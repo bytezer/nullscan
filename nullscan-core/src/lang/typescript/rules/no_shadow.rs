@@ -8,6 +8,8 @@
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at_range;
+
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     let Some(scopes) = ctx.scopes else {
         return Vec::new();
@@ -22,12 +24,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                 .iter()
                 .any(|&index| scopes.bindings[index].name == binding.name);
             if shadowed {
-                out.push(Diagnostic {
-                    rule: "no-shadow",
-                    line: binding.line,
-                    column: binding.column,
-                    message: format!("'{}' shadows a binding in an outer scope", binding.name),
-                });
+                out.extend(report_at_range(
+                    ctx,
+                    "no-shadow",
+                    binding.offset,
+                    binding.offset,
+                    format!("'{}' shadows a binding in an outer scope", binding.name),
+                ));
                 break;
             }
             parent = scopes.scopes[scope_id].parent;

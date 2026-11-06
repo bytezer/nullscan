@@ -3,6 +3,8 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags `any` used as an explicit type.
 ///
 /// ponytail: `#eq?` text predicates aren't evaluated by `QueryCursor::matches`, so the
@@ -23,13 +25,11 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         if report.node.utf8_text(ctx.source.as_bytes()).unwrap_or("") != "any" {
             continue;
         }
-        let start = report.node.start_position();
-        out.push(Diagnostic {
-            rule: "no-explicit-any",
-            line: start.row + 1,
-            column: start.column + 1,
-            message: "unexpected 'any' type".to_string(),
-        });
+        out.push(report_at(
+            "no-explicit-any",
+            report.node,
+            "unexpected 'any' type",
+        ));
     }
     out
 }

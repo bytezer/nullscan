@@ -3,6 +3,8 @@ use tree_sitter::Node;
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags `const x = expr; return x;` — the variable adds nothing over `return expr;`.
 ///
 /// ponytail: only the single-declarator, immediately-adjacent-statement case is
@@ -58,13 +60,11 @@ fn check_immediate_return(decl: Node, ret: Node, source: &str, out: &mut Vec<Dia
     if name.is_empty() || name != returned_name {
         return;
     }
-    let start = decl.start_position();
-    out.push(Diagnostic {
-        rule: "prefer-immediate-return",
-        line: start.row + 1,
-        column: start.column + 1,
-        message: format!(
+    out.push(report_at(
+        "prefer-immediate-return",
+        decl,
+        format!(
             "'{name}' is declared only to be returned immediately; return the expression directly"
         ),
-    });
+    ));
 }

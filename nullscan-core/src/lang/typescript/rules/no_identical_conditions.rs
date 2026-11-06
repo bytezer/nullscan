@@ -3,6 +3,8 @@ use tree_sitter::Node;
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags an `if`/`else if` whose condition text exactly repeats an earlier condition in
 /// the same chain — the later branch can never run, since the earlier identical
 /// condition already caught it.
@@ -36,13 +38,11 @@ fn check_if_chain(node: Node, source: &str, out: &mut Vec<Diagnostic>) {
         if let Some(condition) = n.child_by_field_name("condition") {
             let text = condition.utf8_text(source.as_bytes()).unwrap_or("").trim();
             if seen.contains(&text) {
-                let start = condition.start_position();
-                out.push(Diagnostic {
-                    rule: "no-identical-conditions",
-                    line: start.row + 1,
-                    column: start.column + 1,
-                    message: "this branch duplicates an earlier condition in the same if/else chain and can never run".to_string(),
-                });
+                out.push(report_at(
+                    "no-identical-conditions",
+                    condition,
+                    "this branch duplicates an earlier condition in the same if/else chain and can never run",
+                ));
             } else {
                 seen.push(text);
             }

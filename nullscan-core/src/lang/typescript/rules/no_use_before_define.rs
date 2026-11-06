@@ -14,6 +14,8 @@
 use crate::rule::FileContext;
 use crate::{BindingKind, Diagnostic};
 
+use super::report_at_range;
+
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     let Some(scopes) = ctx.scopes else {
         return Vec::new();
@@ -34,12 +36,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         if binding.scope != reference.scope || reference.offset >= binding.offset {
             continue;
         }
-        out.push(Diagnostic {
-            rule: "no-use-before-define",
-            line: reference.line,
-            column: reference.column,
-            message: format!("'{}' is used before its declaration", reference.name),
-        });
+        out.extend(report_at_range(
+            ctx,
+            "no-use-before-define",
+            reference.offset,
+            reference.offset,
+            format!("'{}' is used before its declaration", reference.name),
+        ));
     }
     out.sort_by_key(|diagnostic| (diagnostic.line, diagnostic.column));
     out

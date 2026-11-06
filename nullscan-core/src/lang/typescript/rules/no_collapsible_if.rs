@@ -3,6 +3,8 @@ use tree_sitter::Node;
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags `if (a) { if (b) { ... } }` with no `else` on either `if` — it can be merged
 /// into `if (a && b) { ... }`.
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
@@ -25,13 +27,11 @@ fn walk_for_collapsible_if(node: Node, source: &str, out: &mut Vec<Diagnostic>) 
                 if inner.kind() == "if_statement"
                     && inner.child_by_field_name("alternative").is_none()
                 {
-                    let start = node.start_position();
-                    out.push(Diagnostic {
-                        rule: "no-collapsible-if",
-                        line: start.row + 1,
-                        column: start.column + 1,
-                        message: "nested 'if' with no 'else' can be merged with the outer condition using '&&'".to_string(),
-                    });
+                    out.push(report_at(
+                        "no-collapsible-if",
+                        node,
+                        "nested 'if' with no 'else' can be merged with the outer condition using '&&'",
+                    ));
                 }
             }
         }

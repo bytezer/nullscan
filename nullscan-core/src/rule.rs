@@ -10,7 +10,7 @@ use tree_sitter::Tree;
 
 use crate::lang::typescript::rules;
 use crate::scope::ScopeGraph;
-use crate::{Config, Diagnostic};
+use crate::{Config, Diagnostic, Severity};
 
 /// Everything a per-file rule needs to inspect one parsed file.
 ///
@@ -29,6 +29,8 @@ pub struct FileContext<'a> {
 pub struct RuleMeta {
     pub id: &'static str,
     pub description: &'static str,
+    /// Report level, derived from the rule's catalog category.
+    pub severity: Severity,
 }
 
 /// Whether a rule runs on each file or needs the whole project.
@@ -62,6 +64,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-console",
             description: "Unexpected console call",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -71,6 +74,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-debugger",
             description: "Unexpected 'debugger' statement",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -80,6 +84,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-var",
             description: "Use 'let' or 'const' instead of 'var'",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -89,6 +94,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "eqeqeq",
             description: "Use '==='/'!==' instead of '=='/'!='",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -98,6 +104,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-explicit-any",
             description: "Avoid the explicit 'any' type",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -107,6 +114,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-empty-catch",
             description: "Empty 'catch' block swallows errors",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -116,6 +124,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "cognitive-complexity",
             description: "Function is too cognitively complex",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -125,6 +134,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-duplicate-string",
             description: "String literal duplicated across the file",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -134,6 +144,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-identical-conditions",
             description: "Branch condition duplicates an earlier one in the same chain",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -143,6 +154,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-redundant-boolean",
             description: "Redundant boolean comparison or double negation",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -152,6 +164,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "prefer-immediate-return",
             description: "Variable declared only to be returned immediately",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -161,6 +174,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-collapsible-if",
             description: "Nested 'if' can be merged with the outer condition",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -170,6 +184,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-identical-expressions",
             description: "Identical expression used on both sides of a binary operator",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -179,6 +194,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-duplicated-branches",
             description: "Two branches share the same implementation",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -188,6 +204,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-all-duplicated-branches",
             description: "All branches share the same implementation",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -197,6 +214,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-useless-catch",
             description: "Catch block only rethrows the caught error",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -206,6 +224,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-redundant-jump",
             description: "Redundant 'return' or 'continue' at the end of a block",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -215,6 +234,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "prefer-single-boolean-return",
             description: "Boolean return wrapped in an 'if'/'else'",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -224,6 +244,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-nested-switch",
             description: "'switch' statement nested inside another 'switch'",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -233,6 +254,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-nested-template-literals",
             description: "Template literal nested inside another template literal",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -242,6 +264,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-small-switch",
             description: "'switch' has too few 'case' clauses",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -251,6 +274,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "max-switch-cases",
             description: "'switch' has too many 'case' clauses",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -260,6 +284,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-same-line-conditional",
             description: "Conditional starts on the same line as the previous statement",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -269,6 +294,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "non-existent-operator",
             description: "Non-existent operator such as '=+' or '=-'",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -278,6 +304,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-self-assign",
             description: "Variable assigned to itself",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -287,6 +314,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-constant-condition",
             description: "Constant condition in 'if' or ternary expression",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -296,6 +324,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "use-isnan",
             description: "Comparison with 'NaN' instead of Number.isNaN",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -305,6 +334,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-array-constructor",
             description: "Array constructed with the 'Array' constructor",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -314,6 +344,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-new-wrappers",
             description: "Primitive wrapper object created with 'new'",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -323,6 +354,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-duplicate-imports",
             description: "Module imported more than once",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -332,6 +364,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-unused-vars",
             description: "Variable or import is declared but never used",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -341,6 +374,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-shadow",
             description: "Variable shadows a binding in an outer scope",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -350,6 +384,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-use-before-define",
             description: "Binding is used before its declaration",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -359,6 +394,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "prefer-const",
             description: "'let' variable is never reassigned; prefer 'const'",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -368,6 +404,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-redeclare",
             description: "Binding is declared more than once in the same scope",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -377,6 +414,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-unreachable",
             description: "Statement is unreachable after a statement that transfers control",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -386,6 +424,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-fallthrough",
             description: "Switch case falls through to the next case",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -395,6 +434,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "consistent-return",
             description: "Function returns a value on some paths but not on others",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -404,6 +444,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-one-iteration-loop",
             description: "Loop body always exits on its first iteration",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -413,6 +454,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-unused-collection",
             description: "Collection is only mutated; its contents are never read",
+            severity: Severity::Info,
         },
         scope: RuleScope::File,
         requires_scope: true,
@@ -422,6 +464,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-element-overwrite",
             description: "Assignment overwrites an unread adjacent assignment to the same target",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -431,6 +474,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-ignored-return",
             description: "Return value of a pure function call is ignored",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -440,6 +484,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-gratuitous-expressions",
             description: "Condition contains a self-contradicting or redundant expression",
+            severity: Severity::Warning,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -449,6 +494,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-eval",
             description: "Direct call to 'eval' executes arbitrary code",
+            severity: Severity::Error,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -458,6 +504,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-implied-eval",
             description: "Timer or execScript called with a string evaluated as code",
+            severity: Severity::Error,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -467,6 +514,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-new-func",
             description: "The 'Function' constructor compiles a string into code",
+            severity: Severity::Error,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -476,6 +524,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "no-script-url",
             description: "String literal uses a 'javascript:' URL",
+            severity: Severity::Error,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -485,6 +534,7 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "hardcoded-secrets",
             description: "Possible hard-coded secret in a string assignment",
+            severity: Severity::Error,
         },
         scope: RuleScope::File,
         requires_scope: false,
@@ -496,12 +546,26 @@ pub const RULES: &[Rule] = &[
         meta: RuleMeta {
             id: "duplicate-code",
             description: "Copy-pasted block of code",
+            severity: Severity::Warning,
         },
         scope: RuleScope::Project,
         requires_scope: false,
         run: None,
     },
 ];
+
+/// Severity of a registered rule id.
+///
+/// Only ids produced by [`RULES`] are expected: the diagnostic builders derive the level
+/// from the same registry entry, so an unknown id means a caller passed a typo. It still
+/// falls back to [`Severity::Info`] rather than panicking, because losing a diagnostic
+/// over a metadata lookup would be worse than under-reporting its level.
+pub fn severity_of(rule: &str) -> Severity {
+    RULES
+        .iter()
+        .find(|registered| registered.meta.id == rule)
+        .map_or(Severity::Info, |registered| registered.meta.severity)
+}
 
 #[cfg(test)]
 mod tests {
@@ -671,6 +735,14 @@ mod tests {
                 "hardcoded-secrets",
             ]
         );
+    }
+
+    #[test]
+    fn every_rule_has_a_matching_severity_lookup() {
+        for rule in RULES {
+            assert_eq!(severity_of(rule.meta.id), rule.meta.severity);
+        }
+        assert_eq!(severity_of("not-a-registered-rule"), Severity::Info);
     }
 
     #[test]

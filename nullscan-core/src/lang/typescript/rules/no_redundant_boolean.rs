@@ -3,7 +3,7 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
-use super::query_rule;
+use super::{query_rule, report_at};
 
 /// Flags `x == true`, `x !== false`, etc. and `!!x`.
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
@@ -44,13 +44,11 @@ fn comparison_rule(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
             if !matches!(operator, "==" | "===" | "!=" | "!==") {
                 continue;
             }
-            let start = node.start_position();
-            out.push(Diagnostic {
-                rule: "no-redundant-boolean",
-                line: start.row + 1,
-                column: start.column + 1,
-                message: "comparing to a boolean literal is redundant".to_string(),
-            });
+            out.push(report_at(
+                "no-redundant-boolean",
+                node,
+                "comparing to a boolean literal is redundant",
+            ));
         }
     }
     out

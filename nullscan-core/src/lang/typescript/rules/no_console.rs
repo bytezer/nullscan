@@ -3,6 +3,8 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags calls whose object is the `console` identifier.
 ///
 /// ponytail: `#eq?` text predicates aren't evaluated by `QueryCursor::matches`, so the
@@ -29,13 +31,11 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
             continue;
         }
         let report = m.captures().iter().find(|c| c.index == report_idx).unwrap();
-        let start = report.node.start_position();
-        out.push(Diagnostic {
-            rule: "no-console",
-            line: start.row + 1,
-            column: start.column + 1,
-            message: "unexpected console call".to_string(),
-        });
+        out.push(report_at(
+            "no-console",
+            report.node,
+            "unexpected console call",
+        ));
     }
     out
 }

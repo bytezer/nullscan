@@ -57,5 +57,6 @@ pub mod prefer_single_boolean_return;
 pub mod use_isnan;
 
 pub(crate) use query::{
-    named_children_without_comments, node_text, query_rule, report_at, static_string_text,
+    named_children_without_comments, node_text, query_rule, report_at, report_at_range,
+    static_string_text,
 };

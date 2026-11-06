@@ -12,6 +12,8 @@ use std::collections::HashSet;
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at_range;
+
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     let Some(scopes) = ctx.scopes else {
         return Vec::new();
@@ -23,12 +25,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         for &binding_index in &scope.bindings {
             let binding = &scopes.bindings[binding_index];
             if !seen.insert(binding.name.as_str()) {
-                out.push(Diagnostic {
-                    rule: "no-redeclare",
-                    line: binding.line,
-                    column: binding.column,
-                    message: format!("'{}' is already declared in this scope", binding.name),
-                });
+                out.extend(report_at_range(
+                    ctx,
+                    "no-redeclare",
+                    binding.offset,
+                    binding.offset,
+                    format!("'{}' is already declared in this scope", binding.name),
+                ));
             }
         }
     }

@@ -12,6 +12,8 @@
 use crate::rule::FileContext;
 use crate::{BindingKind, Diagnostic};
 
+use super::report_at_range;
+
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
     let Some(scopes) = ctx.scopes else {
         return Vec::new();
@@ -46,12 +48,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
                 names.join(", ")
             )
         };
-        out.push(Diagnostic {
-            rule: "prefer-const",
-            line: declarator.line,
-            column: declarator.column,
+        out.extend(report_at_range(
+            ctx,
+            "prefer-const",
+            declarator.start_byte,
+            declarator.end_byte,
             message,
-        });
+        ));
     }
     out.sort_by_key(|diagnostic| (diagnostic.line, diagnostic.column));
     out

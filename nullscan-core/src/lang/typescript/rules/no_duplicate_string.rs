@@ -5,6 +5,8 @@ use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 use crate::Diagnostic;
 use crate::rule::FileContext;
 
+use super::report_at;
+
 /// Flags string literals repeated 3+ times in the same file (mirrors SonarJS S1192);
 /// short strings are exempt since they're usually incidental (e.g. `""`, `"id"`), not
 /// copy-pasted business text worth extracting into a constant.
@@ -46,15 +48,13 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         let index = seen_so_far.entry(text).or_insert(0);
         *index += 1;
         if *index >= threshold {
-            let start = node.start_position();
-            out.push(Diagnostic {
-                rule: "no-duplicate-string",
-                line: start.row + 1,
-                column: start.column + 1,
-                message: format!(
+            out.push(report_at(
+                "no-duplicate-string",
+                *node,
+                format!(
                     "string literal {text} is duplicated {total} times, consider extracting a constant"
                 ),
-            });
+            ));
         }
     }
     out

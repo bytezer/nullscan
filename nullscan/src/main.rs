@@ -67,6 +67,8 @@ fn main() -> ExitCode {
         config: loaded.config,
         config_path: loaded.path,
         max_diagnostics: args.max_diagnostics,
+        overrides: None,
+        cancel: None,
     });
     report.warnings.extend(loaded.warnings);
     report.warnings.sort();

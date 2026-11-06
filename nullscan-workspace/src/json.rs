@@ -144,6 +144,12 @@ pub fn render(report: &ScanReport) -> String {
     text
 }
 
+/// The `summary` object of the JSON contract on its own, so the LSP can answer
+/// `nullscan/analyzeWorkspace` with exactly what `--format json` shows under `summary`.
+pub fn summary_json(report: &ScanReport) -> serde_json::Value {
+    serde_json::to_value(summarize(report)).expect("the summary is always serializable")
+}
+
 fn summarize(report: &ScanReport) -> SummaryInfo {
     let mut files_with_issues = 0;
     let mut by_severity = BySeverity::default();
@@ -298,6 +304,7 @@ mod tests {
             warnings: Vec::new(),
             duration: Duration::from_millis(12),
             truncated: false,
+            cancelled: false,
             config_path: None,
             disabled_rules: vec!["no-var".to_string()],
         }
@@ -399,6 +406,18 @@ mod tests {
         assert_eq!(json["diagnostics"][2]["severity"], "info");
         assert_eq!(json["summary"]["truncated"], true);
         assert!(render(&report).ends_with('\n'));
+    }
+
+    #[test]
+    fn summary_json_matches_the_embedded_summary_object() {
+        let files = vec![file(
+            "a.ts",
+            "a\n",
+            vec![diagnostic("no-console", Severity::Info, 1, 1, 1, 2)],
+        )];
+        let report = report(files);
+
+        assert_eq!(summary_json(&report), parse(&report)["summary"]);
     }
 
     #[test]

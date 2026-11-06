@@ -8,6 +8,7 @@ name = "nullscan-lsp"
 path = "src/main.rs"
 
 [dependencies]
+crossbeam-channel = "0.5"
 env_logger = "0.11.8"
 log = "0.4.34"
 lsp-server = "0.10"

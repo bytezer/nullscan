@@ -10,4 +10,4 @@ pub mod json;
 pub mod scan;
 pub mod walk;
 
-pub use scan::{render_json, scan, FileResult, ScanOptions, ScanReport};
+pub use scan::{FileResult, ScanOptions, ScanReport, merge, render_json, scan};

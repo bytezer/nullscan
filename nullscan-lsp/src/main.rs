@@ -4,11 +4,14 @@
 //! parsing is hand-written so this binary never pulls in the CLI's `clap` stack.
 
 mod convert;
+mod messages;
+mod requests;
 mod server;
 mod uri;
 
 use std::env;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use lsp_server::{Connection, ErrorCode, Message, Request, Response};
 use lsp_types::{
@@ -17,6 +20,7 @@ use lsp_types::{
     TextDocumentSyncSaveOptions,
 };
 
+use messages::MessageSink;
 use server::Server;
 
 const USAGE: &str = "usage: nullscan-lsp --stdio\n       nullscan-lsp --version";
@@ -74,6 +78,9 @@ fn run_stdio() -> ExitCode {
 }
 
 /// Runs the initialize handshake and then the message dispatch loop.
+///
+/// The loop waits on client messages and on finished workspace scans at the same time, so
+/// `$/cancelRequest` and edits are handled while a scan is still running.
 fn serve(connection: &Connection) -> Result<(), String> {
     let (id, params) = connection.initialize_start().map_err(stringify)?;
     let init_params: InitializeParams = serde_json::from_value(params)
@@ -97,24 +104,49 @@ fn serve(connection: &Connection) -> Result<(), String> {
         message_sink(connection),
         server::workspace_folders(&init_params),
     );
-    for message in &connection.receiver {
-        match message {
-            Message::Request(request) => {
-                if connection.handle_shutdown(&request).map_err(stringify)? {
+    let job_results = server.job_results();
+
+    loop {
+        crossbeam_channel::select! {
+            recv(connection.receiver) -> message => {
+                let message = message.map_err(|error| format!("transport closed: {error}"))?;
+                if !dispatch(connection, &mut server, message)? {
                     break;
                 }
-                reject_request(connection, &request);
             }
-            Message::Notification(notification) => server.handle_notification(&notification),
-            Message::Response(_) => log::debug!("ignoring unexpected response"),
+            recv(job_results) -> job => {
+                let job = job.map_err(|error| format!("job channel closed: {error}"))?;
+                server.finish_job(job);
+            }
         }
     }
     Ok(())
 }
 
-fn message_sink(connection: &Connection) -> server::MessageSink {
+/// Routes one incoming message; returns `false` when the client asked to shut down.
+fn dispatch(
+    connection: &Connection,
+    server: &mut Server,
+    message: Message,
+) -> Result<bool, String> {
+    match message {
+        Message::Request(request) => {
+            if connection.handle_shutdown(&request).map_err(stringify)? {
+                return Ok(false);
+            }
+            if !server.handle_request(&request) {
+                reject_request(connection, &request);
+            }
+        }
+        Message::Notification(notification) => server.handle_notification(&notification),
+        Message::Response(_) => log::debug!("ignoring unexpected response"),
+    }
+    Ok(true)
+}
+
+fn message_sink(connection: &Connection) -> MessageSink {
     let sender = connection.sender.clone();
-    Box::new(move |message| {
+    Arc::new(move |message| {
         if sender.send(message).is_err() {
             log::debug!("dropping outgoing message: channel closed");
         }

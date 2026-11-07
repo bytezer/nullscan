@@ -76,6 +76,11 @@ pub struct Reference {
     pub column: usize,
     pub read: bool,
     pub write: bool,
+    /// Whether the occurrence sits in a type context (`type_identifier`, a type
+    /// annotation, type arguments, `typeof` in a type query, ...). A type-only use keeps
+    /// an import alive but cannot hit a temporal dead zone, so `no-use-before-define`
+    /// ignores it. `class A extends B` stays a value reference; `implements I` does not.
+    pub is_type_position: bool,
     /// Filled in after the whole file has been walked, so forward references work.
     pub binding: Option<usize>,
 }
@@ -428,7 +433,17 @@ impl<'a> Builder<'a> {
             if Some(child.id()) == node.child_by_field_name("name").map(|n| n.id()) {
                 continue;
             }
-            self.visit(child, class_scope);
+            // Heritage is evaluated in the enclosing scope, not the class body: `extends`
+            // reads a value there and `implements` a type there. Only the body and the
+            // class's own name belong to the class scope.
+            if matches!(
+                child.kind(),
+                "class_heritage" | "extends_clause" | "implements_clause"
+            ) {
+                self.visit(child, scope);
+            } else {
+                self.visit(child, class_scope);
+            }
         }
     }
 
@@ -777,9 +792,60 @@ impl<'a> Builder<'a> {
             column: start.column + 1,
             read,
             write,
+            is_type_position: is_type_position(node),
             binding: None,
         });
     }
+}
+
+/// Node kinds that put their descendants in a type context. The list is intentionally
+/// broad: a missed kind only means `no-use-before-define` reports a type-only use, while
+/// an extra kind can hide a genuine value use, so `extends_clause` is deliberately absent.
+const TYPE_CONTEXT_KINDS: &[&str] = &[
+    "type_annotation",
+    "type_alias_declaration",
+    "interface_declaration",
+    "type_arguments",
+    "type_parameters",
+    "type_parameter",
+    "type_query",
+    "index_type_query",
+    "predefined_type",
+    "generic_type",
+    "object_type",
+    "union_type",
+    "intersection_type",
+    "function_type",
+    "array_type",
+    "tuple_type",
+    "conditional_type",
+    "mapped_type_clause",
+    "infer_type",
+    "type_predicate",
+    "type_predicate_annotation",
+    "asserts_annotation",
+    "constructor_type",
+    "literal_type",
+    "parenthesized_type",
+    "optional_type",
+    "rest_type",
+    "template_literal_type",
+    "implements_clause",
+];
+
+/// Whether an identifier occurrence is type-only.
+fn is_type_position(node: Node<'_>) -> bool {
+    if node.kind() == "type_identifier" {
+        return true;
+    }
+    let mut ancestor = node.parent();
+    while let Some(current) = ancestor {
+        if TYPE_CONTEXT_KINDS.contains(&current.kind()) {
+            return true;
+        }
+        ancestor = current.parent();
+    }
+    false
 }
 
 #[cfg(test)]
@@ -978,5 +1044,24 @@ mod tests {
         assert!(graph.bindings.iter().all(|binding| binding.name != "I"));
         assert!(graph.bindings.iter().all(|binding| binding.name != "T"));
         assert!(binding(&graph, "x").kind == BindingKind::Const);
+    }
+
+    #[test]
+    fn marks_type_positions_but_keeps_extends_a_value_reference() {
+        let graph = graph(
+            "interface I { k: typeof K }\nconst x: Foo = 1;\nclass A extends B {}\nclass C implements I {}",
+        );
+        let is_type = |name: &str| {
+            graph
+                .references
+                .iter()
+                .find(|reference| reference.name == name)
+                .unwrap_or_else(|| panic!("no reference named '{name}'"))
+                .is_type_position
+        };
+        assert!(is_type("K"), "typeof K in an interface is a type query");
+        assert!(is_type("Foo"), "a type annotation is a type position");
+        assert!(is_type("I"), "implements is a type position");
+        assert!(!is_type("B"), "extends evaluates a runtime value");
     }
 }

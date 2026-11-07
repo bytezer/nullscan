@@ -7,6 +7,9 @@
 //! - `var` and function declarations are hoisted, so earlier references to them are
 //!   accepted.
 //! - Globals (unresolved names) are ignored.
+//! - Type-only references (`const x: Foo = ...` before `interface Foo {}`; the `K` in a
+//!   `typeof K` type query; `foo<Bar>()` before `Bar` exists) are ignored, because types
+//!   are erased at runtime and cannot hit a temporal dead zone.
 //!
 //! This conservative shape avoids reporting references inside functions that only execute
 //! later, at the cost of missing some genuine temporal-dead-zone uses.
@@ -23,6 +26,9 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
 
     let mut out = Vec::new();
     for reference in &scopes.references {
+        if reference.is_type_position {
+            continue;
+        }
         let Some(binding_index) = reference.binding else {
             continue;
         };

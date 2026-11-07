@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn catalog_covers_every_registered_rule() {
-        assert_eq!(catalog().len(), 49);
+        assert_eq!(catalog().len(), 52);
         assert_eq!(catalog().len(), RULES.len());
     }
 

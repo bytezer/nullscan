@@ -656,6 +656,42 @@ pub const RULES: &[Rule] = &[
         requires_scope: false,
         run: None,
     },
+    Rule {
+        meta: RuleMeta {
+            id: "no-alphabetical-sort",
+            description: "Array sorted without a compare function",
+            title: "Provide a sort comparator",
+            why: "Without a comparator, sort() compares elements as strings, so numbers and accented text can come out in the wrong order.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_alphabetical_sort::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-nested-ternary",
+            description: "Ternary expression nested inside another ternary expression",
+            title: "Avoid nested ternaries",
+            why: "Chained ternaries are hard to read; use if/else or a helper instead.",
+            severity: Severity::Info,
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_nested_ternary::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-array-index-key",
+            description: "JSX key uses the index parameter of a map callback",
+            title: "Use stable keys",
+            why: "Index keys change when the list is reordered, so React can reuse the wrong DOM node.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_array_index_key::run),
+    },
 ];
 
 /// Severity of a registered rule id.
@@ -847,6 +883,9 @@ mod tests {
                 "no-new-func",
                 "no-script-url",
                 "hardcoded-secrets",
+                "no-alphabetical-sort",
+                "no-nested-ternary",
+                "no-array-index-key",
             ]
         );
     }
@@ -868,6 +907,7 @@ mod tests {
             "prefer-const",
             "no-redeclare",
             "no-unused-collection",
+            "no-array-index-key",
         ] {
             let rule = RULES
                 .iter()
@@ -885,6 +925,7 @@ mod tests {
                     | "prefer-const"
                     | "no-redeclare"
                     | "no-unused-collection"
+                    | "no-array-index-key"
             )
         }) {
             assert!(

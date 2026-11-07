@@ -8,7 +8,7 @@
 //! inside `{...}` expressions still does.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 use tree_sitter::{Node, Tree};
@@ -17,14 +17,58 @@ use crate::Language;
 
 pub struct Duplicate {
     pub token_count: usize,
+    /// Lines spanned by the first side, the user-facing size of the clone.
+    pub line_count: usize,
     pub a: DuplicateLocation,
     pub b: DuplicateLocation,
+}
+
+impl Duplicate {
+    pub fn new(token_count: usize, a: DuplicateLocation, b: DuplicateLocation) -> Self {
+        let line_count = a.end_line.saturating_sub(a.start_line) + 1;
+        Self {
+            token_count,
+            line_count,
+            a,
+            b,
+        }
+    }
 }
 
 pub struct DuplicateLocation {
     pub file: PathBuf,
     pub start_line: usize,
     pub end_line: usize,
+}
+
+/// Copies plus the line-density metric of the files that went into the pass.
+pub struct DuplicateReport {
+    pub duplicates: Vec<Duplicate>,
+    pub stats: DuplicationStats,
+}
+
+/// Human-facing duplication metric: how many lines of code live inside a clone.
+#[derive(Default)]
+pub struct DuplicationStats {
+    /// Lines of code covered by at least one clone, each line counted once per file.
+    pub duplicated_lines: usize,
+    /// Lines of code across every file included in the pass.
+    pub total_lines: usize,
+    pub duplicated_blocks: usize,
+    /// Files with at least one duplicated line of code.
+    pub duplicated_files: usize,
+    pub largest_block_lines: usize,
+}
+
+impl DuplicationStats {
+    /// `duplicated_lines / total_lines` as a percentage rounded to one decimal.
+    pub fn density(&self) -> f64 {
+        if self.total_lines == 0 {
+            return 0.0;
+        }
+        let percent = self.duplicated_lines as f64 / self.total_lines as f64 * 100.0;
+        (percent * 10.0).round() / 10.0
+    }
 }
 
 struct Token {
@@ -35,6 +79,8 @@ struct Token {
 struct FileTokens {
     path: PathBuf,
     tokens: Vec<Token>,
+    /// One flag per source line, `true` for lines of code (see [`loc_lines`]).
+    loc_lines: Vec<bool>,
 }
 
 pub struct DuplicateOptions {
@@ -48,22 +94,34 @@ pub struct DuplicateOptions {
 pub fn find_duplicates(
     files: &[(PathBuf, Language, String)],
     options: DuplicateOptions,
-) -> Vec<Duplicate> {
-    let min_tokens = options.min_tokens;
-    // Parsing dominates the cost here, so it's done in parallel (each call builds its
-    // own `Parser`, which isn't shareable across concurrent calls).
-    let file_tokens: Vec<FileTokens> = files
+) -> DuplicateReport {
+    let file_tokens = parse_files(files, options.compare_markup);
+    let duplicates = detect_duplicates(&file_tokens, options.min_tokens);
+    let stats = duplication_stats(&file_tokens, &duplicates);
+    DuplicateReport { duplicates, stats }
+}
+
+/// Parses every file once, in parallel (each call builds its own `Parser`, which isn't
+/// shareable across concurrent calls). Files that fail to parse drop out of the pass.
+fn parse_files(
+    files: &[(PathBuf, Language, String)],
+    compare_markup: bool,
+) -> Vec<FileTokens> {
+    files
         .par_iter()
         .filter_map(|(path, language, source)| {
             let tree = language.parse(source)?;
             Some(FileTokens {
                 path: path.clone(),
-                tokens: tokenize(&tree, source, options.compare_markup),
+                tokens: tokenize(&tree, source, compare_markup),
+                loc_lines: loc_lines(&tree, source),
             })
         })
-        .collect();
+        .collect()
+}
 
-    let buckets = build_windows(&file_tokens, min_tokens);
+fn detect_duplicates(file_tokens: &[FileTokens], min_tokens: usize) -> Vec<Duplicate> {
+    let buckets = build_windows(file_tokens, min_tokens);
     let mut visited: Vec<Vec<bool>> = file_tokens.iter().map(|f| vec![false; f.tokens.len()]).collect();
 
     let mut keys: Vec<&String> = buckets.keys().collect();
@@ -88,15 +146,77 @@ pub fn find_duplicates(
                 mark_visited(&mut visited[fa], start_a, len);
                 mark_visited(&mut visited[fb], start_b, len);
 
-                out.push(Duplicate {
-                    token_count: len,
-                    a: location(&file_tokens[fa], start_a, len),
-                    b: location(&file_tokens[fb], start_b, len),
-                });
+                out.push(Duplicate::new(
+                    len,
+                    location(&file_tokens[fa], start_a, len),
+                    location(&file_tokens[fb], start_b, len),
+                ));
             }
         }
     }
     out
+}
+
+/// Counts the line-density metric over the files that took part in the pass: clone
+/// spans are line ranges, so blank and comment-only lines inside a clone are not code.
+fn duplication_stats(files: &[FileTokens], duplicates: &[Duplicate]) -> DuplicationStats {
+    let index: HashMap<&Path, usize> = files
+        .iter()
+        .enumerate()
+        .map(|(position, file)| (file.path.as_path(), position))
+        .collect();
+    let mut duplicated: Vec<Vec<bool>> = files
+        .iter()
+        .map(|file| vec![false; file.loc_lines.len()])
+        .collect();
+
+    for duplicate in duplicates {
+        mark_duplicate_side(files, &mut duplicated, &index, &duplicate.a);
+        mark_duplicate_side(files, &mut duplicated, &index, &duplicate.b);
+    }
+
+    DuplicationStats {
+        duplicated_lines: duplicated.iter().flatten().filter(|marked| **marked).count(),
+        total_lines: files
+            .iter()
+            .flat_map(|file| file.loc_lines.iter())
+            .filter(|is_code| **is_code)
+            .count(),
+        duplicated_blocks: duplicates.len(),
+        duplicated_files: duplicated
+            .iter()
+            .filter(|lines| lines.iter().any(|marked| *marked))
+            .count(),
+        largest_block_lines: duplicates
+            .iter()
+            .map(|duplicate| duplicate.line_count)
+            .max()
+            .unwrap_or(0),
+    }
+}
+
+/// Marks the code lines of one clone side. Spans from several clones union, so a line
+/// shared by two blocks is still one duplicated line.
+fn mark_duplicate_side(
+    files: &[FileTokens],
+    duplicated: &mut [Vec<bool>],
+    index: &HashMap<&Path, usize>,
+    side: &DuplicateLocation,
+) {
+    let Some(&position) = index.get(side.file.as_path()) else {
+        return;
+    };
+    let loc_lines = &files[position].loc_lines;
+    if loc_lines.is_empty() {
+        return;
+    }
+    let start = side.start_line.saturating_sub(1).min(loc_lines.len() - 1);
+    let end = side.end_line.saturating_sub(1).min(loc_lines.len() - 1);
+    for (line, marked) in duplicated[position].iter_mut().enumerate().take(end + 1) {
+        if line >= start && loc_lines[line] {
+            *marked = true;
+        }
+    }
 }
 
 fn location(file: &FileTokens, start: usize, len: usize) -> DuplicateLocation {
@@ -157,6 +277,46 @@ fn tokenize(tree: &Tree, source: &str, compare_markup: bool) -> Vec<Token> {
     let mut out = Vec::new();
     collect_leaves(tree.root_node(), source, compare_markup, &mut out);
     out
+}
+
+/// One flag per source line: a line is a line of code when it has a non-whitespace
+/// character outside every comment node, so code with a trailing comment counts and
+/// blank or comment-only lines do not. Comments come from the existing tree, no re-parse.
+fn loc_lines(tree: &Tree, source: &str) -> Vec<bool> {
+    let mut comments = Vec::new();
+    collect_comment_ranges(tree.root_node(), &mut comments);
+
+    let mut lines = Vec::new();
+    let mut offset = 0;
+    for line in source.split('\n') {
+        lines.push(line_has_code(line, offset, &comments));
+        offset += line.len() + 1;
+    }
+    lines
+}
+
+fn collect_comment_ranges(node: Node, out: &mut Vec<(usize, usize)>) {
+    if node.kind() == "comment" {
+        let range = node.byte_range();
+        out.push((range.start, range.end));
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_comment_ranges(child, out);
+    }
+}
+
+fn line_has_code(line: &str, line_start: usize, comments: &[(usize, usize)]) -> bool {
+    line.char_indices().any(|(offset, character)| {
+        !character.is_whitespace() && !is_commented(line_start + offset, comments)
+    })
+}
+
+fn is_commented(position: usize, comments: &[(usize, usize)]) -> bool {
+    comments
+        .iter()
+        .any(|&(start, end)| position >= start && position < end)
 }
 
 fn collect_leaves(node: Node, source: &str, compare_markup: bool, out: &mut Vec<Token>) {
@@ -292,22 +452,43 @@ mod tests {
             .join("\n")
     }
 
+    fn side(file: &str, start_line: usize, end_line: usize) -> DuplicateLocation {
+        DuplicateLocation {
+            file: PathBuf::from(file),
+            start_line,
+            end_line,
+        }
+    }
+
+    fn source_loc_lines(source: &str) -> Vec<bool> {
+        let tree = Language::TypeScript.parse(source).expect("parse");
+        loc_lines(&tree, source)
+    }
+
+    fn file_with_loc(path: &str, loc_lines: &[bool]) -> FileTokens {
+        FileTokens {
+            path: PathBuf::from(path),
+            tokens: Vec::new(),
+            loc_lines: loc_lines.to_vec(),
+        }
+    }
+
     #[test]
     fn flags_identical_blocks_across_files() {
         let block = big_block("call");
         let a = format!("function a() {{\n{block}\n}}");
         let b = format!("function b() {{\n{block}\n}}");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
-        assert_eq!(dups.len(), 1);
-        assert!(dups[0].token_count >= 30);
+        let report = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
+        assert_eq!(report.duplicates.len(), 1);
+        assert!(report.duplicates[0].token_count >= 30);
     }
 
     #[test]
     fn does_not_flag_distinct_files() {
         let a = big_block("call");
         let b = big_block("other");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
-        assert!(dups.is_empty());
+        let report = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
+        assert!(report.duplicates.is_empty());
     }
 
     #[test]
@@ -317,24 +498,24 @@ mod tests {
         let block = big_block("step");
         let a = format!("function a() {{\n{block}\n}}");
         let b = format!("function b() {{\n{block}\n}}");
-        let dups = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
-        assert_eq!(dups.len(), 1);
+        let report = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
+        assert_eq!(report.duplicates.len(), 1);
     }
 
     #[test]
     fn short_snippets_are_ignored() {
         let a = "const x = 1;\nconst y = 2;";
         let b = "const x = 1;\nconst y = 2;";
-        let dups = find_duplicates(&files(&[("a.ts", a), ("b.ts", b)]), options(30));
-        assert!(dups.is_empty());
+        let report = find_duplicates(&files(&[("a.ts", a), ("b.ts", b)]), options(30));
+        assert!(report.duplicates.is_empty());
     }
 
     #[test]
     fn does_not_flag_overlapping_windows_within_the_same_block() {
         // A single big block should never be reported as a duplicate of itself.
         let a = big_block("x");
-        let dups = find_duplicates(&files(&[("a.ts", &a)]), options(30));
-        assert!(dups.is_empty());
+        let report = find_duplicates(&files(&[("a.ts", &a)]), options(30));
+        assert!(report.duplicates.is_empty());
     }
 
     /// An inline SVG icon with well over 30 markup tokens; only `d` differs per file.
@@ -353,10 +534,10 @@ mod tests {
         let b = svg_icon("M9 9");
         let pair = tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]);
         let without_markup = find_duplicates(&pair, options(30));
-        assert!(without_markup.is_empty());
+        assert!(without_markup.duplicates.is_empty());
 
         let with_markup = find_duplicates(&pair, options_with_markup(30));
-        assert!(!with_markup.is_empty());
+        assert!(!with_markup.duplicates.is_empty());
     }
 
     #[test]
@@ -364,8 +545,8 @@ mod tests {
         // Both icons carry the same `{color}` expression, but that is only three tokens.
         let a = svg_icon("M1 1").replace("><path", ">{color}<path");
         let b = svg_icon("M9 9").replace("><path", ">{color}<path");
-        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
-        assert!(dups.is_empty());
+        let report = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
+        assert!(report.duplicates.is_empty());
     }
 
     #[test]
@@ -375,8 +556,8 @@ mod tests {
                    <button className=\"cta\">Click me now</button>\
                    <span className=\"hint\">Hint text</span></div>;";
         let pair = tsx_files(&[("a.tsx", src), ("b.tsx", src)]);
-        assert!(find_duplicates(&pair, options(30)).is_empty());
-        assert!(!find_duplicates(&pair, options_with_markup(30)).is_empty());
+        assert!(find_duplicates(&pair, options(30)).duplicates.is_empty());
+        assert!(!find_duplicates(&pair, options_with_markup(30)).duplicates.is_empty());
     }
 
     #[test]
@@ -385,8 +566,8 @@ mod tests {
                      .map((item) => render(item, { key: item.id, label: item.name }))";
         let a = format!("const a = <section className=\"alpha\">{{{logic}}}</section>;");
         let b = format!("const b = <article data-role=\"beta\">{{{logic}}}</article>;");
-        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
-        assert!(!dups.is_empty());
+        let report = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(30));
+        assert!(!report.duplicates.is_empty());
     }
 
     #[test]
@@ -394,11 +575,122 @@ mod tests {
         let text = "lorem ipsum dolor sit amet ".repeat(12);
         let a = format!("const first = <p className=\"alpha\">{{value}}{text}</p>;");
         let b = format!("const second = <section className=\"beta\">{{value}}{text}</section>;");
-        let dups = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(10));
-        assert!(dups.is_empty());
+        let report = find_duplicates(&tsx_files(&[("a.tsx", &a), ("b.tsx", &b)]), options(10));
+        assert!(report.duplicates.is_empty());
 
         let tree = Language::Tsx.parse(&a).expect("parse");
         let tokens = tokenize(&tree, &a, false);
         assert!(!tokens.iter().any(|token| token.text.starts_with("lorem")));
+    }
+
+    #[test]
+    fn loc_lines_require_code_outside_comments() {
+        let source = concat!(
+            "// leading comment\n",
+            "\n",
+            "const a = 1;   // trailing comment\n",
+            "  \n",
+            "/* block\n",
+            "   comment */\n",
+            "const b = \"// not a comment\";\n",
+            "const c = 3; /* block start\n",
+            "   of a comment */\n",
+        );
+        let flags = source_loc_lines(source);
+
+        assert_eq!(
+            flags.iter().filter(|is_code| **is_code).count(),
+            3,
+            "flags: {flags:?}"
+        );
+        assert_eq!(flags[0], false, "comment-only line");
+        assert_eq!(flags[1], false, "blank line");
+        assert_eq!(flags[2], true, "code plus a trailing comment");
+        assert_eq!(flags[3], false, "whitespace-only line");
+        assert_eq!(flags[4], false, "block-comment opener");
+        assert_eq!(flags[5], false, "block-comment body");
+        assert_eq!(flags[6], true, "`//` inside a string is code");
+        assert_eq!(flags[7], true, "code plus a block-comment opener");
+        assert_eq!(flags[8], false, "block-comment continuation");
+    }
+
+    #[test]
+    fn clone_metrics_skip_comment_and_blank_lines_inside_a_clone() {
+        let block = big_block("call").replacen("call20();", "// shared comment\n\ncall20();", 1);
+        let a = format!("function a() {{\n{block}\n}}");
+        let b = format!("function b() {{\n{block}\n}}");
+        let report = find_duplicates(&files(&[("a.ts", &a), ("b.ts", &b)]), options(30));
+
+        assert_eq!(report.duplicates.len(), 1);
+        // The clone spans 44 lines but only the 42 code lines on each side count.
+        assert_eq!(report.duplicates[0].line_count, 44);
+        assert_eq!(report.stats.duplicated_lines, 84);
+        assert_eq!(report.stats.total_lines, 84);
+        assert_eq!(report.stats.duplicated_blocks, 1);
+        assert_eq!(report.stats.duplicated_files, 2);
+        assert_eq!(report.stats.largest_block_lines, 44);
+        assert_eq!(report.stats.density(), 100.0);
+    }
+
+    #[test]
+    fn clone_sides_are_unioned_per_file() {
+        // Indices 3, 8 and 9 are blank or comment-only lines, so they never count as LOC.
+        let loc: Vec<bool> = (0..10)
+            .map(|line| line != 3 && line != 8 && line != 9)
+            .collect();
+        let duplicates = vec![
+            // Overlapping sides: lines 2-6 and 5-8 share lines 5 and 6.
+            Duplicate::new(30, side("a.ts", 2, 6), side("a.ts", 5, 8)),
+            Duplicate::new(30, side("a.ts", 9, 10), side("missing.ts", 1, 2)),
+        ];
+
+        let stats = duplication_stats(&[file_with_loc("a.ts", &loc)], &duplicates);
+
+        // Union of indices 1-7 minus the blank index 3; the missing file is ignored.
+        assert_eq!(stats.duplicated_lines, 6);
+        assert_eq!(stats.total_lines, 7);
+        assert_eq!(stats.duplicated_files, 1);
+        assert_eq!(stats.duplicated_blocks, 2);
+        assert_eq!(stats.largest_block_lines, 5);
+        assert_eq!(stats.density(), 85.7);
+    }
+
+    #[test]
+    fn density_rounds_to_one_decimal() {
+        let density = |duplicated_lines, total_lines| {
+            DuplicationStats {
+                duplicated_lines,
+                total_lines,
+                ..DuplicationStats::default()
+            }
+            .density()
+        };
+
+        assert_eq!(density(1, 3), 33.3);
+        assert_eq!(density(2, 3), 66.7);
+        assert_eq!(density(1, 8), 12.5);
+        assert_eq!(density(1, 2), 50.0);
+        assert_eq!(density(0, 4), 0.0);
+    }
+
+    #[test]
+    fn no_duplicates_mean_zero_density() {
+        let report = find_duplicates(&files(&[("a.ts", "const a = 1;")]), options(30));
+
+        assert!(report.duplicates.is_empty());
+        assert_eq!(report.stats.duplicated_lines, 0);
+        assert_eq!(report.stats.total_lines, 1);
+        assert_eq!(report.stats.duplicated_blocks, 0);
+        assert_eq!(report.stats.duplicated_files, 0);
+        assert_eq!(report.stats.largest_block_lines, 0);
+        assert_eq!(report.stats.density(), 0.0);
+    }
+
+    #[test]
+    fn density_is_zero_without_any_line_of_code() {
+        let stats = duplication_stats(&[file_with_loc("a.ts", &[false, false])], &[]);
+
+        assert_eq!(stats.total_lines, 0);
+        assert_eq!(stats.density(), 0.0);
     }
 }

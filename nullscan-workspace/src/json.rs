@@ -7,7 +7,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use nullscan_core::{Diagnostic, Duplicate, Severity, byte_col_to_utf16, severity_of};
+use nullscan_core::{
+    Diagnostic, Duplicate, DuplicationStats, Severity, byte_col_to_utf16, severity_of,
+};
 use serde::Serialize;
 
 use crate::scan::{FileResult, ScanReport};
@@ -48,7 +50,35 @@ struct SummaryInfo {
     by_severity: BySeverity,
     by_rule: Vec<RuleCount>,
     duplicates: usize,
+    /// Line-density metric of the duplicate pass, so editors can show one percentage.
+    duplication: DuplicationInfo,
     truncated: bool,
+}
+
+/// One percentage plus the raw counts behind it; `density` is already rounded to one
+/// decimal, and the `duplicated*` fields include every file in the duplicate pass.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DuplicationInfo {
+    density: f64,
+    duplicated_lines: usize,
+    total_lines: usize,
+    duplicated_blocks: usize,
+    duplicated_files: usize,
+    largest_block_lines: usize,
+}
+
+impl From<&DuplicationStats> for DuplicationInfo {
+    fn from(stats: &DuplicationStats) -> Self {
+        Self {
+            density: stats.density(),
+            duplicated_lines: stats.duplicated_lines,
+            total_lines: stats.total_lines,
+            duplicated_blocks: stats.duplicated_blocks,
+            duplicated_files: stats.duplicated_files,
+            largest_block_lines: stats.largest_block_lines,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -106,6 +136,7 @@ struct DuplicateEntry {
     rule: &'static str,
     severity: &'static str,
     token_count: usize,
+    line_count: usize,
     a: DuplicateSide,
     b: DuplicateSide,
 }
@@ -183,6 +214,7 @@ fn summarize(report: &ScanReport) -> SummaryInfo {
         by_severity,
         by_rule,
         duplicates: report.duplicates.len(),
+        duplication: DuplicationInfo::from(&report.duplication),
         truncated: report.truncated,
     }
 }
@@ -239,6 +271,7 @@ fn duplicate_entry(duplicate: &Duplicate) -> DuplicateEntry {
         rule: "duplicate-code",
         severity: severity_of("duplicate-code").as_str(),
         token_count: duplicate.token_count,
+        line_count: duplicate.line_count,
         a: duplicate_side(&duplicate.a),
         b: duplicate_side(&duplicate.b),
     }
@@ -301,6 +334,7 @@ mod tests {
         ScanReport {
             files,
             duplicates: Vec::new(),
+            duplication: DuplicationStats::default(),
             warnings: Vec::new(),
             duration: Duration::from_millis(12),
             truncated: false,
@@ -367,6 +401,12 @@ mod tests {
         assert_eq!(summary["byRule"][0]["count"], 2);
         assert_eq!(summary["byRule"][1]["rule"], "no-var");
         assert_eq!(summary["duplicates"], 0);
+        assert_eq!(summary["duplication"]["density"], 0.0);
+        assert_eq!(summary["duplication"]["duplicatedLines"], 0);
+        assert_eq!(summary["duplication"]["totalLines"], 0);
+        assert_eq!(summary["duplication"]["duplicatedBlocks"], 0);
+        assert_eq!(summary["duplication"]["duplicatedFiles"], 0);
+        assert_eq!(summary["duplication"]["largestBlockLines"], 0);
         assert_eq!(summary["truncated"], false);
     }
 
@@ -423,19 +463,19 @@ mod tests {
     #[test]
     fn duplicates_use_the_registry_severity() {
         let mut report = report(vec![file("a.ts", "a\n", Vec::new())]);
-        report.duplicates = vec![Duplicate {
-            token_count: 30,
-            a: DuplicateLocation {
+        report.duplicates = vec![Duplicate::new(
+            30,
+            DuplicateLocation {
                 file: PathBuf::from("a.ts"),
                 start_line: 1,
                 end_line: 3,
             },
-            b: DuplicateLocation {
+            DuplicateLocation {
                 file: PathBuf::from("b.ts"),
                 start_line: 5,
                 end_line: 7,
             },
-        }];
+        )];
         let json = parse(&report);
 
         assert_eq!(json["summary"]["duplicates"], 1);
@@ -443,7 +483,29 @@ mod tests {
         assert_eq!(duplicate["rule"], "duplicate-code");
         assert_eq!(duplicate["severity"], "warning");
         assert_eq!(duplicate["tokenCount"], 30);
+        assert_eq!(duplicate["lineCount"], 3);
         assert_eq!(duplicate["a"]["startLine"], 1);
         assert_eq!(duplicate["b"]["endLine"], 7);
+    }
+
+    #[test]
+    fn summary_carries_the_duplication_metric() {
+        let mut report = report(vec![file("a.ts", "a\n", Vec::new())]);
+        report.duplication = DuplicationStats {
+            duplicated_lines: 25,
+            total_lines: 40,
+            duplicated_blocks: 2,
+            duplicated_files: 3,
+            largest_block_lines: 12,
+        };
+        let json = parse(&report);
+        let duplication = &json["summary"]["duplication"];
+
+        assert_eq!(duplication["density"], 62.5);
+        assert_eq!(duplication["duplicatedLines"], 25);
+        assert_eq!(duplication["totalLines"], 40);
+        assert_eq!(duplication["duplicatedBlocks"], 2);
+        assert_eq!(duplication["duplicatedFiles"], 3);
+        assert_eq!(duplication["largestBlockLines"], 12);
     }
 }

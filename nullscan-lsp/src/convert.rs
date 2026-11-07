@@ -139,8 +139,9 @@ fn duplicate_diagnostic(
 }
 
 fn duplicate_message(token_count: usize, other: &DuplicateLocation) -> String {
+    let line_count = other.end_line.saturating_sub(other.start_line) + 1;
     format!(
-        "duplicated block of {token_count} tokens, also found at {}:{}-{}",
+        "duplicated block of {line_count} lines ({token_count} tokens), also found at {}:{}-{}",
         other.file.display(),
         other.start_line,
         other.end_line
@@ -320,19 +321,20 @@ mod tests {
                     diagnostics: Vec::new(),
                 },
             ],
-            duplicates: vec![Duplicate {
-                token_count: 42,
-                a: DuplicateLocation {
+            duplicates: vec![Duplicate::new(
+                42,
+                DuplicateLocation {
                     file: PathBuf::from("/repo/a.ts"),
                     start_line: 2,
                     end_line: 4,
                 },
-                b: DuplicateLocation {
+                DuplicateLocation {
                     file: PathBuf::from("/repo/b.ts"),
                     start_line: 1,
                     end_line: 3,
                 },
-            }],
+            )],
+            duplication: nullscan_core::DuplicationStats::default(),
             warnings: Vec::new(),
             duration: std::time::Duration::ZERO,
             truncated: false,
@@ -361,7 +363,7 @@ mod tests {
         assert_eq!(a.source.as_deref(), Some("nullscan"));
         assert_eq!(
             a.message,
-            "duplicated block of 42 tokens, also found at /repo/b.ts:1-3"
+            "duplicated block of 3 lines (42 tokens), also found at /repo/b.ts:1-3"
         );
 
         let related = &a.related_information.as_ref().expect("related information")[0];
@@ -374,7 +376,7 @@ mod tests {
         assert_eq!(back.location.range, a.range);
         assert_eq!(
             b.message,
-            "duplicated block of 42 tokens, also found at /repo/a.ts:2-4"
+            "duplicated block of 3 lines (42 tokens), also found at /repo/a.ts:2-4"
         );
     }
 

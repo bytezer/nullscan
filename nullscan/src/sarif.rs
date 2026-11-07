@@ -136,7 +136,8 @@ pub fn render(files: &[FileResult], duplicates: &[Duplicate]) -> String {
             level: level(nullscan_core::severity_of("duplicate-code")),
             message: MessageText {
                 text: format!(
-                    "duplicated block of {} tokens, also found at {}:{}-{}",
+                    "duplicated block of {} lines ({} tokens), also found at {}:{}-{}",
+                    duplicate.line_count,
                     duplicate.token_count,
                     duplicate.b.file.display(),
                     duplicate.b.start_line,

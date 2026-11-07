@@ -10,6 +10,7 @@ import {
   type Issue,
   type RuleGroup,
 } from "./aggregate";
+import { duplicationCard, type DuplicationStats } from "./duplication";
 import { titleOf, type RuleInfo } from "./rules";
 import { formatDuration, type SummaryPayload } from "./summary";
 
@@ -139,6 +140,7 @@ ${card("Total issues", String(total), "total")}
 ${card("Files with issues", String(files.length), "total")}
 </section>
 ${scanSection(state.summary)}
+${duplicationSection(state.summary)}
 <section>
 <h2>Top rules</h2>
 ${ruleTable(topRuleGroups, state.rules)}
@@ -219,6 +221,17 @@ th { font-weight: 600; opacity: 0.8; }
 .scan { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 .scan dt { opacity: 0.8; }
 .scan dd { margin: 0; }
+.duplication-head { display: flex; align-items: baseline; gap: 8px; }
+.duplication-head .value { font-size: 1.6em; font-weight: 600; }
+.duplication-head .label { font-size: 0.85em; opacity: 0.8; }
+.duplication .bar {
+  height: 8px;
+  margin: 10px 0 12px;
+  border-radius: 4px;
+  background: var(--vscode-panel-border);
+  overflow: hidden;
+}
+.duplication .bar-fill { height: 100%; background: var(--vscode-progressBar-background); }
 .empty { opacity: 0.7; }
 .warning { color: var(--vscode-editorWarning-foreground); }
 footer {
@@ -265,6 +278,41 @@ function scanSection(summary: SummaryPayload | null): string {
 <dt>Truncated</dt><dd>${summary.truncated ? "yes" : "no"}</dd>
 </dl>
 ${truncated}
+</section>`;
+}
+
+/** Line-density card: one percentage, its bar, and the counts behind it. */
+function duplicationSection(summary: SummaryPayload | null): string {
+  if (summary === null) {
+    return emptyDuplication(
+      "No workspace scan has run yet. Use <strong>Rescan</strong> to analyze the workspace.",
+    );
+  }
+  // An older server may answer without the metric, so keep the panel usable.
+  const stats: DuplicationStats | undefined = summary.duplication;
+  if (stats === undefined) {
+    return emptyDuplication("This server does not report the duplication metric.");
+  }
+  const card = duplicationCard(stats);
+  return `<section>
+<h2>Duplication</h2>
+<div class="card duplication">
+<div class="duplication-head"><span class="value">${card.density}</span><span class="label">of lines of code are duplicated</span></div>
+<div class="bar" role="img" aria-label="Duplicated lines: ${card.density}"><div class="bar-fill" style="width: ${card.barWidth}"></div></div>
+<dl class="scan">
+<dt>Lines</dt><dd>${card.lines}</dd>
+<dt>Blocks</dt><dd>${card.blocks}</dd>
+<dt>Files</dt><dd>${card.files}</dd>
+<dt>Largest block</dt><dd>${card.largestBlock}</dd>
+</dl>
+</div>
+</section>`;
+}
+
+function emptyDuplication(message: string): string {
+  return `<section>
+<h2>Duplication</h2>
+<p class="empty">${message}</p>
 </section>`;
 }
 

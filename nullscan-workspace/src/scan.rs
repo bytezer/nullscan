@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use nullscan_core::{
-    Config, Diagnostic, Duplicate, DuplicateOptions, Language, analyze, find_duplicates,
+    Config, Diagnostic, Duplicate, DuplicateOptions, DuplicateReport, DuplicationStats, Language,
+    analyze, find_duplicates,
 };
 use rayon::prelude::*;
 
@@ -46,6 +47,8 @@ pub struct FileResult {
 pub struct ScanReport {
     pub files: Vec<FileResult>,
     pub duplicates: Vec<Duplicate>,
+    /// Line-density metric of the files that went through the duplicate pass.
+    pub duplication: DuplicationStats,
     pub warnings: Vec<String>,
     pub duration: Duration,
     pub truncated: bool,
@@ -92,10 +95,12 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
         }
     }
 
-    let duplicates = if cancelled {
-        Vec::new()
+    let (duplicates, duplication) = if cancelled {
+        (Vec::new(), DuplicationStats::default())
     } else {
-        find_duplicates_if_enabled(&files, &options.config, options.duplicates_ignore)
+        let report =
+            duplicate_report(&files, &options.config, options.duplicates_ignore);
+        (report.duplicates, report.stats)
     };
     let total_diagnostics: usize = files.iter().map(|file| file.diagnostics.len()).sum();
     let truncated = cap_diagnostics(&mut files, options.max_diagnostics, total_diagnostics);
@@ -106,6 +111,7 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
     ScanReport {
         files,
         duplicates,
+        duplication,
         warnings,
         duration: started.elapsed(),
         truncated,
@@ -124,6 +130,7 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
 pub fn merge(reports: Vec<ScanReport>) -> ScanReport {
     let mut files = Vec::new();
     let mut duplicates = Vec::new();
+    let mut duplication = DuplicationStats::default();
     let mut seen_duplicates = HashSet::new();
     let mut warnings = Vec::new();
     let mut disabled_rules = BTreeSet::new();
@@ -139,6 +146,11 @@ pub fn merge(reports: Vec<ScanReport>) -> ScanReport {
                 duplicates.push(duplicate);
             }
         }
+        // Line totals add up per folder, exactly like the concatenated file list; the
+        // block counts come from the deduplicated list below.
+        duplication.duplicated_lines += report.duplication.duplicated_lines;
+        duplication.total_lines += report.duplication.total_lines;
+        duplication.duplicated_files += report.duplication.duplicated_files;
         warnings.extend(report.warnings);
         disabled_rules.extend(report.disabled_rules);
         duration += report.duration;
@@ -149,12 +161,20 @@ pub fn merge(reports: Vec<ScanReport>) -> ScanReport {
         }
     }
 
+    duplication.duplicated_blocks = duplicates.len();
+    duplication.largest_block_lines = duplicates
+        .iter()
+        .map(|duplicate| duplicate.line_count)
+        .max()
+        .unwrap_or(0);
+
     warnings.sort();
     warnings.dedup();
 
     ScanReport {
         files,
         duplicates,
+        duplication,
         warnings,
         duration,
         truncated,
@@ -231,13 +251,18 @@ fn single_config_path(paths: Vec<PathBuf>) -> Option<PathBuf> {
     }
 }
 
-fn find_duplicates_if_enabled(
+/// Runs the cross-file clone pass over every file that is not excluded from it, or an
+/// empty report when `duplicate-code` is disabled.
+fn duplicate_report(
     files: &[FileResult],
     config: &Config,
     ignore: Option<&PathFilter>,
-) -> Vec<Duplicate> {
+) -> DuplicateReport {
     if !config.rule_enabled("duplicate-code") {
-        return Vec::new();
+        return DuplicateReport {
+            duplicates: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
     }
     let sources: Vec<(PathBuf, Language, String)> = files
         .iter()
@@ -426,19 +451,19 @@ mod tests {
 
     #[test]
     fn merge_concatenates_counts_and_dedupes_shared_entries() {
-        let duplicate = Duplicate {
-            token_count: 30,
-            a: DuplicateLocation {
+        let duplicate = Duplicate::new(
+            30,
+            DuplicateLocation {
                 file: PathBuf::from("/repo/a.ts"),
                 start_line: 1,
                 end_line: 3,
             },
-            b: DuplicateLocation {
+            DuplicateLocation {
                 file: PathBuf::from("/repo/b.ts"),
                 start_line: 5,
                 end_line: 7,
             },
-        };
+        );
 
         let first = ScanReport {
             files: vec![FileResult {
@@ -448,6 +473,13 @@ mod tests {
                 diagnostics: Vec::new(),
             }],
             duplicates: vec![duplicate],
+            duplication: DuplicationStats {
+                duplicated_lines: 6,
+                total_lines: 20,
+                duplicated_blocks: 1,
+                duplicated_files: 2,
+                largest_block_lines: 3,
+            },
             warnings: vec!["warning: shared".to_string()],
             duration: Duration::from_millis(10),
             truncated: true,
@@ -462,20 +494,27 @@ mod tests {
                 source: "b\n".to_string(),
                 diagnostics: Vec::new(),
             }],
-            duplicates: vec![Duplicate {
-                token_count: 30,
+            duplicates: vec![Duplicate::new(
+                30,
                 // Same span pair with the sides swapped still counts as one duplicate.
-                a: DuplicateLocation {
+                DuplicateLocation {
                     file: PathBuf::from("/repo/b.ts"),
                     start_line: 5,
                     end_line: 7,
                 },
-                b: DuplicateLocation {
+                DuplicateLocation {
                     file: PathBuf::from("/repo/a.ts"),
                     start_line: 1,
                     end_line: 3,
                 },
-            }],
+            )],
+            duplication: DuplicationStats {
+                duplicated_lines: 2,
+                total_lines: 9,
+                duplicated_blocks: 1,
+                duplicated_files: 1,
+                largest_block_lines: 5,
+            },
             warnings: vec!["warning: shared".to_string(), "warning: only".to_string()],
             duration: Duration::from_millis(15),
             truncated: false,
@@ -488,6 +527,11 @@ mod tests {
 
         assert_eq!(merged.files.len(), 2);
         assert_eq!(merged.duplicates.len(), 1);
+        assert_eq!(merged.duplication.duplicated_lines, 8);
+        assert_eq!(merged.duplication.total_lines, 29);
+        assert_eq!(merged.duplication.duplicated_files, 3);
+        assert_eq!(merged.duplication.duplicated_blocks, 1);
+        assert_eq!(merged.duplication.largest_block_lines, 3);
         assert_eq!(merged.warnings, vec!["warning: only", "warning: shared"]);
         assert_eq!(merged.disabled_rules, vec!["eqeqeq", "no-var"]);
         assert_eq!(merged.duration, Duration::from_millis(25));
@@ -555,6 +599,12 @@ mod tests {
         let baseline = scan(options(&[root.clone()], detected, None));
         assert_eq!(baseline.files.len(), 2);
         assert!(!baseline.duplicates.is_empty());
+        assert_eq!(baseline.duplication.duplicated_files, 2);
+        assert!(baseline.duplication.duplicated_lines > 0);
+        assert_eq!(
+            baseline.duplication.duplicated_blocks,
+            baseline.duplicates.len()
+        );
 
         let (duplicates_ignore, warnings) =
             PathFilter::new(root.clone(), &["tests/mocks/**".to_string()]);
@@ -568,6 +618,10 @@ mod tests {
 
         assert_eq!(filtered.files.len(), 2);
         assert!(filtered.duplicates.is_empty());
+        // Ignored files are analyzed but stay out of the metric: no line was compared.
+        assert_eq!(filtered.duplication.total_lines, 0);
+        assert_eq!(filtered.duplication.duplicated_lines, 0);
+        assert_eq!(filtered.duplication.density(), 0.0);
         let _ = fs::remove_dir_all(root);
     }
 

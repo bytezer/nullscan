@@ -116,11 +116,11 @@ fn print_text(report: &ScanReport) {
     }
     for duplicate in &report.duplicates {
         println!(
-            "duplicate code ({} tokens): {}:{}-{} <-> {}:{}-{}",
-            duplicate.token_count,
+            "{}:{}:1: [duplicate-code] duplicated block of {} lines ({} tokens), also found at {}:{}-{}",
             duplicate.a.file.display(),
             duplicate.a.start_line,
-            duplicate.a.end_line,
+            duplicate.line_count,
+            duplicate.token_count,
             duplicate.b.file.display(),
             duplicate.b.start_line,
             duplicate.b.end_line,

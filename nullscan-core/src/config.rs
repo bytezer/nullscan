@@ -12,6 +12,10 @@ pub struct Config {
     pub duplicates_compare_markup: bool,
     pub duplicate_string_threshold: usize,
     pub duplicate_string_min_length: usize,
+    /// Raw (undecoded) literal contents that `no-duplicate-string` skips entirely, so
+    /// project-wide vocabulary such as CSS keywords never counts toward the threshold.
+    /// Matching is exact and case-sensitive; there is no globbing.
+    pub duplicate_string_ignore: HashSet<String>,
     /// Maximum number of non-default `case` clauses allowed before `max-switch-cases`.
     pub max_switch_cases: usize,
     /// Minimum number of non-default `case` clauses required before `no-small-switch`.
@@ -27,6 +31,7 @@ impl Default for Config {
             duplicates_compare_markup: false,
             duplicate_string_threshold: 3,
             duplicate_string_min_length: 10,
+            duplicate_string_ignore: HashSet::new(),
             max_switch_cases: 10,
             no_small_switch_min_cases: 3,
         }

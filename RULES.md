@@ -62,6 +62,9 @@ Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-conso
 | <a id="no-script-url"></a>`no-script-url` | security | ESLint `no-script-url`; no direct SonarJS equivalent | Implemented (file-scoped; string and substitution-free template literals) |
 | <a id="hardcoded-secrets"></a>`hardcoded-secrets` | security | SonarJS S6418 (hard-coded secrets); no ESLint core equivalent | Implemented (file-scoped; name/value heuristic, not a secret scanner) |
 | <a id="duplicate-code"></a>`duplicate-code` | duplication | SonarQube duplication metrics (`duplicated_blocks`); not a SonarJS rule | Implemented (project-scoped, CLI; executable logic only, JSX markup opt-in via `[duplicates].compare-markup`) |
+| <a id="no-alphabetical-sort"></a>`no-alphabetical-sort` | bug | SonarJS S2871 `no-alphabetical-sort`; no ESLint core equivalent | Implemented (file-scoped; `sort`/`toSorted` with no comparator or `undefined`) |
+| <a id="no-nested-ternary"></a>`no-nested-ternary` | code smell | SonarJS S3358 `no-nested-ternary`; ESLint `no-nested-ternary` | Implemented (file-scoped; function boundaries stop the nesting) |
+| <a id="no-array-index-key"></a>`no-array-index-key` | bug | SonarJS S6479 `no-array-index-key`; eslint-plugin-react `react/no-array-index-key` | Implemented (file-scoped; scope analysis; inline `map`/`flatMap` callbacks only) |
 
 ### Conservative limits
 
@@ -80,6 +83,11 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
 - `prefer-single-boolean-return` only matches a direct `if`/`else` whose branches are
   literal `return true;` / `return false;`.
 - `no-nested-switch` stops at a function boundary between the switches.
+- `no-nested-ternary` stops at a function boundary and reports the inner ternary once;
+  chained `else if`-style ternaries in any of the three fields are caught.
+- `no-alphabetical-sort` matches any `.sort()`/`.toSorted()` call with no argument or a
+  literal `undefined`, regardless of the element type (so `["b", "a"].sort()` fires). It
+  is not type-aware and cannot see through a custom `sort` method.
 - `no-nested-template-literals` reports each nested template once.
 - `no-same-line-conditional` only checks statement-list positions and never flags an
   `else if`.
@@ -161,7 +169,10 @@ a control-flow graph, data-flow analysis, or type checker:
 - `no-use-before-define` only reports `let`/`const`/`class` references that appear earlier
   in the *same* lexical scope. References inside nested functions or blocks are not
   reported even if they might run sooner; `var` and function declarations are hoisted and
-  never reported, and unresolved globals are ignored.
+  never reported, and unresolved globals are ignored. Type-only uses (type annotations,
+  `typeof` type queries, type arguments, `implements`) are ignored, because types are
+  erased at runtime; `class A extends B` stays a value use and is reported when `B` comes
+  later.
 - `prefer-const` reports a `let` declarator with an initializer when its bindings have no
   recorded writes. Writes are lexical, not path-sensitive, so a write in dead code still
   suppresses the diagnostic (a deliberate false negative). Declarators without an
@@ -176,6 +187,12 @@ a control-flow graph, data-flow analysis, or type checker:
   assignment. Any other reference counts as a read and suppresses it. Module-level
   bindings are skipped, and the rule is not type-aware, so an object whose own method is
   named like a collection mutator is treated the same way.
+- `no-array-index-key` resolves the identifier in a JSX `key={...}` expression and reports
+  it only when it binds to the second parameter of a callback written inline as an arrow
+  function or function expression passed to `.map(...)`/`.flatMap(...)`. Named callbacks,
+  `.map(fn, thisArg)`, a local named `index`, and a shadowing parameter are ignored.
+  Type-only usage inside a `key` expression counts as a reference too, since the scope
+  graph records both.
 
 ## Adding a rule
 

@@ -20,6 +20,13 @@ mod tests {
         analyze(source, &Config::default()).iter().map(|d| d.rule).collect()
     }
 
+    fn tsx_rules(source: &str) -> Vec<&'static str> {
+        crate::analyze(source, Language::Tsx, &Config::default())
+            .iter()
+            .map(|d| d.rule)
+            .collect()
+    }
+
     #[test]
     fn flags_console_log() {
         assert_eq!(rules("console.log('hi');"), vec!["no-console"]);
@@ -604,6 +611,112 @@ mod tests {
     }
 
     #[test]
+    fn flags_sorts_without_a_comparator() {
+        assert_eq!(
+            rules("const sorted = [3, 1, 2].sort();"),
+            vec!["no-alphabetical-sort"]
+        );
+        assert_eq!(
+            rules("const sorted = values.toSorted();"),
+            vec!["no-alphabetical-sort"]
+        );
+        assert_eq!(
+            rules("const sorted = values.sort(undefined);"),
+            vec!["no-alphabetical-sort"]
+        );
+        // Arrays of strings are flagged too: the default comparison is still alphabetical.
+        assert_eq!(
+            rules("const words = ['b', 'a'];\nwords.sort();"),
+            vec!["no-alphabetical-sort"]
+        );
+    }
+
+    #[test]
+    fn allows_sorts_with_a_comparator_and_unrelated_calls() {
+        assert!(rules("const sorted = values.sort((a, b) => a - b);").is_empty());
+        assert!(rules("const sorted = values.toSorted(compare);").is_empty());
+        assert!(rules("const joined = values.join(',');").is_empty());
+        assert!(rules("const sliced = values.slice(0, 2);").is_empty());
+    }
+
+    #[test]
+    fn flags_nested_ternaries_in_every_branch() {
+        assert_eq!(
+            rules("const value = a ? b ? 1 : 2 : 3;"),
+            vec!["no-nested-ternary"]
+        );
+        assert_eq!(
+            rules("const value = a ? 1 : b ? 2 : 3;"),
+            vec!["no-nested-ternary"]
+        );
+        assert_eq!(
+            rules("const value = (a ? b : c) ? 1 : 2;"),
+            vec!["no-nested-ternary"]
+        );
+    }
+
+    #[test]
+    fn allows_a_single_ternary_and_one_behind_a_function_boundary() {
+        assert!(rules("const value = a ? 1 : 2;").is_empty());
+        assert!(rules("const value = a ? () => (b ? 1 : 2) : 3;").is_empty());
+        assert!(
+            rules("function f() { return a ? 1 : 2; }").is_empty(),
+            "a single ternary inside a function is not nested"
+        );
+    }
+
+    #[test]
+    fn flags_array_index_keys_in_map_callbacks() {
+        assert_eq!(
+            tsx_rules("const list = items.map((item, index) => <li key={index}>{item}</li>);"),
+            vec!["no-array-index-key"]
+        );
+        assert_eq!(
+            tsx_rules("const list = items.map((item, i) => <li key={`item-${i}`}>{item}</li>);"),
+            vec!["no-array-index-key"]
+        );
+        assert_eq!(
+            tsx_rules(
+                "const list = items.map((item, i) => <li key={i.toString()}>{item}</li>);"
+            ),
+            vec!["no-array-index-key"]
+        );
+        assert_eq!(
+            tsx_rules(
+                "const list = items.map(function (item, i) { return <li key={i}>{item}</li>; });"
+            ),
+            vec!["no-array-index-key"]
+        );
+        assert_eq!(
+            tsx_rules("const list = items.map(({ id }, index) => <li key={index}>{id}</li>);"),
+            vec!["no-array-index-key"]
+        );
+        assert_eq!(
+            tsx_rules(
+                "const list = items.flatMap((item, index) => <li key={index}>{item}</li>);"
+            ),
+            vec!["no-array-index-key"]
+        );
+    }
+
+    #[test]
+    fn allows_stable_keys_and_shadowed_indexes() {
+        assert!(tsx_rules("const list = items.map((item) => <li key={item.id}>{item}</li>);").is_empty());
+        assert!(tsx_rules("const list = items.map(() => <li key={uuid()} />);").is_empty());
+        assert!(tsx_rules("const index = 0;\nconst item = <li key={index}>{index}</li>;").is_empty());
+        assert!(
+            tsx_rules(
+                "const list = items.map((item, position) => {\n\
+                 const render = (index: number) => <li key={index}>{item}</li>;\n\
+                 return render(position);\n\
+                 });"
+            )
+            .is_empty(),
+            "an inner parameter named index shadows the map index"
+        );
+    }
+
+    #[test]
     fn flags_use_before_define_in_the_same_scope() {
         let src = "function f() { use(value); let value = 1; value = 2; return value; }";
         assert_eq!(rules(src), vec!["no-use-before-define"]);
@@ -617,6 +730,31 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn ignores_type_only_uses_before_the_declaration() {
+        // `typeof` in a type query, a type alias, type arguments and annotations are all
+        // erased at runtime, so an earlier declaration order is harmless.
+        assert!(rules("interface I { k: typeof K }\nconst K = 1;").is_empty());
+        assert!(rules("type T = { k: typeof K };\nconst K = 1;").is_empty());
+        assert!(rules("foo<Bar>();\ninterface Bar {}").is_empty());
+        assert!(rules("const x: Foo = 1;\ninterface Foo {}").is_empty());
+    }
+
+    #[test]
+    fn still_flags_value_uses_before_the_declaration() {
+        assert_eq!(
+            rules("console.log(X);\nconst X = 1;"),
+            vec!["no-console", "no-use-before-define"]
+        );
+        // `extends` evaluates the class at runtime (temporal dead zone), unlike
+        // `implements`, which is type-only.
+        assert_eq!(
+            rules("class A extends B {}\nclass B {}"),
+            vec!["no-use-before-define"]
+        );
+        assert!(rules("interface I {}\nclass A implements I {}").is_empty());
     }
 
     #[test]

@@ -12,7 +12,10 @@ mod suppression;
 mod text;
 
 pub use config::Config;
-pub use duplication::{find_duplicates, Duplicate, DuplicateLocation, DuplicateOptions};
+pub use duplication::{
+    Duplicate, DuplicateLocation, DuplicateOptions, DuplicateReport, DuplicationStats,
+    find_duplicates,
+};
 pub use language::Language;
 pub use rule::{FileContext, Rule, RuleMeta, RuleRun, RuleScope, RULES, severity_of};
 pub use scope::{

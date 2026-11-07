@@ -77,6 +77,14 @@ fn duplicates_are_linked_on_both_sides_and_an_edit_drops_one_side() {
         a_duplicate["message"]
             .as_str()
             .expect("message")
+            .starts_with("duplicated block of 42 lines ("),
+        "message: {}",
+        a_duplicate["message"]
+    );
+    assert!(
+        a_duplicate["message"]
+            .as_str()
+            .expect("message")
             .contains("also found at"),
         "message: {}",
         a_duplicate["message"]

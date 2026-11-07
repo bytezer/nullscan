@@ -1154,6 +1154,7 @@ mod tests {
         server.publish_report(&nullscan_workspace::ScanReport {
             files: Vec::new(),
             duplicates: Vec::new(),
+            duplication: nullscan_core::DuplicationStats::default(),
             warnings: Vec::new(),
             duration: std::time::Duration::ZERO,
             truncated: false,
@@ -1450,19 +1451,20 @@ mod tests {
                     diagnostics: Vec::new(),
                 },
             ],
-            duplicates: vec![Duplicate {
-                token_count: 35,
-                a: DuplicateLocation {
+            duplicates: vec![Duplicate::new(
+                35,
+                DuplicateLocation {
                     file: PathBuf::from("/tmp/fixture/a.ts"),
                     start_line: 2,
                     end_line: 4,
                 },
-                b: DuplicateLocation {
+                DuplicateLocation {
                     file: PathBuf::from("/tmp/fixture/b.ts"),
                     start_line: 1,
                     end_line: 3,
                 },
-            }],
+            )],
+            duplication: nullscan_core::DuplicationStats::default(),
             warnings: Vec::new(),
             duration: Duration::ZERO,
             truncated: false,

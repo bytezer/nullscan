@@ -3,6 +3,10 @@
 //! The core crate's `Config` stays plain and `serde`-free; the TOML shape and its
 //! deserialization are entirely a workspace concern. Keeping the loader here means the
 //! CLI and the editor integration accept exactly the same file.
+//!
+//! Besides the global `[rules].disabled` list, `[rules.<rule-id>]` tables carry per-rule
+//! options. Only `[rules.no-duplicate-string].ignore` exists today: a list of literal
+//! contents that rule skips, matched exactly and case-sensitively.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +27,14 @@ struct FileConfig {
 #[derive(Deserialize, Default)]
 struct FileRulesConfig {
     disabled: Option<Vec<String>>,
+    /// Options for `[rules.no-duplicate-string]`, the per-rule table below.
+    #[serde(rename = "no-duplicate-string")]
+    no_duplicate_string: Option<FileRuleIgnoreConfig>,
+}
+
+#[derive(Deserialize, Default)]
+struct FileRuleIgnoreConfig {
+    ignore: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Default)]
@@ -177,6 +189,16 @@ fn apply_rules(
     let Some(rules) = &file_config.rules else {
         return;
     };
+    apply_disabled_rules(rules, config, path, warnings);
+    apply_rule_options(rules, config);
+}
+
+fn apply_disabled_rules(
+    rules: &FileRulesConfig,
+    config: &mut Config,
+    path: &Path,
+    warnings: &mut Vec<String>,
+) {
     let Some(disabled) = &rules.disabled else {
         return;
     };
@@ -191,6 +213,16 @@ fn apply_rules(
         }
     }
     config.disabled_rules = disabled.iter().cloned().collect();
+}
+
+fn apply_rule_options(rules: &FileRulesConfig, config: &mut Config) {
+    if let Some(ignore) = rules
+        .no_duplicate_string
+        .as_ref()
+        .and_then(|rule| rule.ignore.as_ref())
+    {
+        config.duplicate_string_ignore = ignore.iter().cloned().collect();
+    }
 }
 
 fn apply_thresholds(file_config: &FileConfig, config: &mut Config) {
@@ -272,6 +304,7 @@ mod tests {
         assert!(loaded.config.disabled_rules.is_empty());
         assert_eq!(loaded.config.cognitive_complexity_threshold, 15);
         assert_eq!(loaded.config.duplicate_code_min_tokens, 30);
+        assert!(loaded.config.duplicate_string_ignore.is_empty());
         assert!(loaded.ignore.is_empty());
         assert!(loaded.duplicates_ignore.is_empty());
         assert_eq!(loaded.root, std::env::current_dir().expect("cwd"));
@@ -482,6 +515,103 @@ mod tests {
         assert!(loaded.duplicates_ignore.matches(&root.join("tests/mocks/a.ts")));
         assert!(!loaded.duplicates_ignore.matches(&root.join("tests/a.ts")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_duplicate_string_ignore_is_parsed() {
+        let path = temp_file(
+            "string-ignore",
+            r#"
+            [rules.no-duplicate-string]
+            ignore = ["transparent", "currentColor", "100%"]
+            "#,
+        );
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(loaded.config.duplicate_string_ignore.len(), 3);
+        assert!(
+            loaded
+                .config
+                .duplicate_string_ignore
+                .contains("transparent")
+        );
+        assert!(
+            loaded
+                .config
+                .duplicate_string_ignore
+                .contains("currentColor")
+        );
+        assert!(loaded.config.duplicate_string_ignore.contains("100%"));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn no_duplicate_string_ignore_defaults_to_empty() {
+        let path = temp_file("string-ignore-default", "[rules]\ndisabled = []\n");
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.config.duplicate_string_ignore.is_empty());
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn string_ignore_coexists_with_disabled_rules() {
+        let path = temp_file(
+            "string-ignore-coexist",
+            r#"
+            [rules]
+            disabled = ["no-console"]
+
+            [rules.no-duplicate-string]
+            ignore = ["transparent"]
+            "#,
+        );
+
+        let loaded = load(Some(&path)).expect("load config");
+
+        assert!(loaded.warnings.is_empty());
+        assert!(!loaded.config.rule_enabled("no-console"));
+        assert!(loaded.config.rule_enabled("no-var"));
+        assert!(
+            loaded
+                .config
+                .duplicate_string_ignore
+                .contains("transparent")
+        );
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn wrong_string_ignore_type_is_a_config_error() {
+        let path = temp_file(
+            "string-ignore-wrong-type",
+            "[rules.no-duplicate-string]\nignore = \"transparent\"\n",
+        );
+
+        let Err(error) = load(Some(&path)) else {
+            panic!("wrong no-duplicate-string ignore type must fail");
+        };
+
+        assert!(error.starts_with(&format!("invalid config file {}:", path.display())));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[test]
+    fn wrong_string_ignore_entry_type_is_a_config_error() {
+        let path = temp_file(
+            "string-ignore-entry-wrong-type",
+            "[rules.no-duplicate-string]\nignore = [1]\n",
+        );
+
+        let Err(error) = load(Some(&path)) else {
+            panic!("non-string ignore entry must fail");
+        };
+
+        assert!(error.starts_with(&format!("invalid config file {}:", path.display())));
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
 
     #[test]

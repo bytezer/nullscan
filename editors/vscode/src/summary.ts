@@ -9,6 +9,7 @@ import {
   type SeverityLevel,
   type SeverityTotals,
 } from "./aggregate";
+import type { DuplicationStats } from "./duplication";
 
 /** The `summary` object shared by `--format json` and both custom LSP requests. */
 export interface SummaryPayload {
@@ -18,6 +19,7 @@ export interface SummaryPayload {
   bySeverity: { error: number; warning: number; info: number };
   byRule: Array<{ rule: string; count: number }>;
   duplicates: number;
+  duplication: DuplicationStats;
   truncated: boolean;
 }
 

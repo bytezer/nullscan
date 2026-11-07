@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with
 pre-release versions such as `0.x.0-beta.1` for testers.
 
+## [0.1.0-beta.4] - 2026-11-06
+
+Real-repository round: more server-side signal, fewer false positives, and a human
+duplication measure.
+
+### Added
+
+- **Three rules** — `no-alphabetical-sort` (SonarJS S2871) flags `sort()`/`toSorted()`
+  without a compare function; `no-nested-ternary` (S3358) flags ternaries nested in
+  another ternary; `no-array-index-key` (S6479) flags JSX keys bound to the index
+  parameter of a `map`/`flatMap` callback, resolved through the scope graph so shadowed
+  names are not reported.
+- **Per-rule ignored strings** — `[rules.no-duplicate-string] ignore = ["transparent", "currentColor"]` skips ubiquitous CSS values without disabling the rule.
+- **Duplication density** — the JSON summary now carries `duplication.density` (percentage
+  of duplicated lines of code), `duplicatedLines`, `totalLines`, `duplicatedBlocks`,
+  `duplicatedFiles` and `largestBlockLines`. The VS Code summary panel renders it with a
+  bar, and per-block messages show lines plus tokens.
+
+### Fixed
+
+- `no-use-before-define` no longer flags type-position references such as
+  `interface I { key: typeof CARD_KEYS }` where `CARD_KEYS` is declared later; real
+  value uses, including `class A extends B`, still report.
+
+### Changed
+
+- Duplicate diagnostics use the same line format as every other diagnostic and include
+  the block size in lines as well as tokens.
+
 ## [0.1.0-beta.3] - 2026-11-06
 
 Testing round focused on signal quality and on making the rules understandable

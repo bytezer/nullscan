@@ -8,8 +8,8 @@ community edition's limitations (branch analysis, etc.).
 
 ## Current state
 
-Working PoC: TypeScript parsing via [tree-sitter](https://tree-sitter.github.io/tree-sitter/)
-and a CLI that runs a set of rules against a `.ts` file.
+Working beta: TypeScript parsing via [tree-sitter](https://tree-sitter.github.io/tree-sitter/),
+52 rules, a CLI, a language server and a VS Code extension.
 
 ## Structure
 
@@ -94,6 +94,10 @@ Everything is optional; anything omitted keeps its built-in default:
 [rules]
 disabled = ["no-console", "no-var"]
 
+# Literal values that no-duplicate-string should not count, matched without quotes.
+[rules.no-duplicate-string]
+ignore = ["transparent", "currentColor"]
+
 [thresholds]
 cognitive-complexity = 20        # default: 15
 duplicate-code-min-tokens = 50   # default: 30
@@ -128,6 +132,32 @@ segment, `**` spans any number of segments, a trailing `/` covers the whole subt
 a pattern without `/` matches any segment, so `tests` covers both `tests/` and
 `src/tests/`. `[files].ignore` removes files from the run entirely; `[duplicates].ignore`
 keeps them analyzed but out of clone detection, which is what fixtures and mocks need.
+
+## Duplication metric
+
+The JSON summary carries a human measure alongside the block count:
+
+```json
+"duplication": {
+  "density": 3.4,
+  "duplicatedLines": 1240,
+  "totalLines": 36000,
+  "duplicatedBlocks": 12,
+  "duplicatedFiles": 7,
+  "largestBlockLines": 42
+}
+```
+
+`density` is the percentage of **lines of code** that belong to at least one reported
+clone, with one decimal. A line of code is non-empty and not entirely a comment; code
+with a trailing comment counts. Overlapping clones count a line once, and only files that
+enter the duplicate pass (after `[duplicates].ignore`) contribute to either side of the
+ratio. `duplicatedBlocks` is the number of clones, `duplicatedFiles` the files with at
+least one duplicated line, and `largestBlockLines` the biggest clone.
+
+Per-block messages show both units: `duplicated block of 42 lines (312 tokens)`. The text
+formatter prints them like any other diagnostic (`file:line:column: [duplicate-code] …`),
+and the VS Code summary panel renders the density with a bar and the same breakdown.
 
 ## Suppressing findings
 
@@ -209,6 +239,9 @@ project-scoped `duplicate-code`).
 | `no-new-func` | `new Function(...)` and `Function(...)` |
 | `no-script-url` | String values starting with `javascript:` |
 | `hardcoded-secrets` | Secret-like names assigned a hard-coded string (heuristic) |
+| `no-alphabetical-sort` | `sort()`/`toSorted()` without a compare function |
+| `no-nested-ternary` | Ternary expression nested inside another ternary |
+| `no-array-index-key` | JSX `key` that uses the index parameter of a `map` callback |
 
 ## Performance
 
@@ -306,6 +339,9 @@ What's shipped, and what's next.
 - [x] `no-new-func` — `Function` constructor
 - [x] `no-script-url` — `javascript:` URLs
 - [x] `hardcoded-secrets` — heuristic hard-coded secret detection
+- [x] `no-alphabetical-sort` — `sort`/`toSorted` without a comparator
+- [x] `no-nested-ternary` — chained ternaries
+- [x] `no-array-index-key` — array index used as a JSX key
 - [ ] `no-identical-functions` — whole duplicated functions
 - [ ] `max-params`
 - [ ] `cognitive-complexity` at class/file level

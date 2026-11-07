@@ -48,17 +48,34 @@ suite("Nullscan extension", () => {
 
     const diagnostics = await waitForNullscanDiagnostics(document.uri);
     const console = diagnostics.find(
-      (diagnostic) => diagnostic.code === "no-console" && diagnostic.source === "nullscan",
+      (diagnostic) =>
+        codeValue(diagnostic.code) === "no-console" && diagnostic.source === "nullscan",
     );
     assert.ok(
       console !== undefined,
       `expected a no-console diagnostic, got ${JSON.stringify(diagnostics)}`,
+    );
+    // beta 3 attaches a docs target, so VS Code represents the code as an object.
+    assert.equal(
+      typeof console.code === "object" && console.code !== null
+        ? console.code.target?.fragment
+        : undefined,
+      "no-console",
+      "the diagnostic should link to its RULES.md anchor",
     );
 
     const extension = vscode.extensions.getExtension(EXTENSION_ID);
     assert.equal(extension?.isActive, true, "the extension must stay active");
   });
 });
+
+/** VS Code wraps the code when a `codeDescription` target is attached. */
+function codeValue(code: vscode.Diagnostic["code"]): string | number | undefined {
+  if (typeof code === "object" && code !== null) {
+    return code.value;
+  }
+  return code;
+}
 
 async function waitForNullscanDiagnostics(uri: vscode.Uri): Promise<vscode.Diagnostic[]> {
   const deadline = Date.now() + DIAGNOSTIC_TIMEOUT_MS;

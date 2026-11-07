@@ -77,8 +77,9 @@ fall back to the rule ids and the generic `RULES.md` page.
 
 **Nullscan: Show Summary** opens (or reveals) a single *Nullscan summary* panel with severity
 totals, total issues, files with issues, the top 10 rules (human name plus rule id), the top
-10 hot files, the last
-scan's file count, duration, duplicates and truncation flag, a *stale* badge when the
+10 hot files, a **Duplication** card with the line-density percentage (duplicated LOC over
+total LOC), a bar, duplicated lines, blocks, files and the largest block, the last
+scan's file count, duration and truncation flag, a *stale* badge when the
 workspace changed after the scan, and the resolved `nullscan.toml` path. Its **Rescan** and
 **Open config** buttons run the matching commands. The panel is plain HTML/CSS with a strict
 nonce-based Content-Security-Policy, no framework and no external assets.

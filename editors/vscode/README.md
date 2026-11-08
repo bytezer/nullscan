@@ -8,13 +8,14 @@ server; this extension only starts it, shows diagnostics and exposes the workspa
 Grab the `.vsix` from the release page and install it from the command line:
 
 ```sh
-code --install-extension nullscan-0.1.0.vsix
+code --install-extension nullscan-0.1.0-beta.4.vsix
 ```
 
 Or use **Extensions** → **…** → **Install from VSIX…** in the editor.
 
-The extension needs VS Code 1.91 or newer on Linux, macOS or Windows (x64 or arm64), and a
-`nullscan-lsp` binary from the same release. It resolves the server in this order:
+The extension needs VS Code 1.91 or newer. Releases currently publish prebuilt language
+servers only for Linux x64 and arm64; on macOS and Windows, build `nullscan-lsp` locally and
+point `nullscan.path` at it. It resolves the server in this order:
 
 1. the `nullscan.path` setting;
 2. a bundled `bin/<platform>-<arch>/nullscan-lsp` inside the extension;
@@ -86,16 +87,14 @@ nonce-based Content-Security-Policy, no framework and no external assets.
 
 ## Automatic download
 
-Releases publish raw binaries (`nullscan-lsp-<target-triple>`, plus `.exe` on Windows) and
-a `checksums.txt` manifest next to them. There are no archives.
+Releases currently publish raw server binaries for the two Linux targets (plus a
+`checksums.txt` manifest). macOS and Windows assets are not built during the beta, so the
+extension cannot download a server there; set `nullscan.path` to a local build instead.
 
 | Target triple               | Platform            |
 | --------------------------- | ------------------- |
 | `x86_64-unknown-linux-gnu`  | Linux x64           |
 | `aarch64-unknown-linux-gnu` | Linux arm64         |
-| `x86_64-apple-darwin`       | macOS Intel         |
-| `aarch64-apple-darwin`      | macOS Apple silicon |
-| `x86_64-pc-windows-msvc`    | Windows x64         |
 
 The asset is fetched from
 `https://github.com/bytezer/nullscan/releases/download/v<version>/<asset>`. The extension
@@ -121,8 +120,11 @@ Output** and **Retry**; every step is logged in the **Nullscan** output channel.
 - Duplicate findings come from a workspace scan, not from the open buffer: run
   **Nullscan: Analyze Workspace** to see `duplicate-code`, and re-run it after large edits.
   Editing a file drops its duplicate diagnostics until the next scan.
-- There are no inline suppressions yet (`// nullscan-ignore` is not implemented); use
-  `nullscan.toml`, `nullscan.configPath` or the *Disable rule* quick fix.
+- Inline suppressions work server-side: `// nullscan-ignore-next-line [rules]` and
+  `// nullscan-ignore-line [rules]` apply to file-scoped rules, and the **Suppress \<rule\> on
+  the next line** quick fix inserts the comment for you. They do not apply to
+  `duplicate-code`; use `nullscan.toml`, `nullscan.configPath` or the *Disable rule* quick
+  fix for that.
 - No telemetry: nothing is collected or sent. The only network access is the optional
   server download.
 - The download follows the `http.proxy` / `http.proxyStrictSSL` VS Code settings. A proxy

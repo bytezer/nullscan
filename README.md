@@ -9,7 +9,7 @@ community edition's limitations (branch analysis, etc.).
 ## Current state
 
 Working beta: TypeScript parsing via [tree-sitter](https://tree-sitter.github.io/tree-sitter/),
-52 rules, a CLI, a language server and a VS Code extension.
+56 rules, a CLI, a language server and a VS Code extension.
 
 ## Structure
 
@@ -30,10 +30,11 @@ cargo run -p nullscan -- src/*.ts          # your shell expands the glob
 cargo run -p nullscan -- src/              # walked recursively for .ts/.tsx
 ```
 
-Directory arguments are walked recursively, skipping `node_modules` and dotdirs.
-Prints one diagnostic per line (`file:line:column: [rule] message`). Exit codes are
-`0` clean, `1` findings (diagnostics or duplicates), and `2` tool error (invalid
-config or no existing input path).
+Directory arguments are walked recursively, skipping `node_modules`, `dist`, `build`, `.next`,
+`out` and dot-directories. Prints one diagnostic per line (`file:line:column: [rule] message`).
+Exit codes are `0` clean, `1` findings (diagnostics, duplicates or truncation), and `2` tool
+error (invalid config or no existing input path). See [docs/cli.md](./docs/cli.md) for every
+flag and the full output-format reference.
 
 Add `--format sarif` for [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) JSON output
 instead — consumed natively by GitHub Code Scanning and editor SARIF viewers, so
@@ -45,12 +46,33 @@ cargo run -p nullscan -- src/ --format sarif > results.sarif
 
 Add `--format json` for the machine-readable contract used by editors and CI. It is the
 stable interface: 0-based lines and 0-based UTF-16 characters, per-severity and per-rule
-summary counts, duplicate locations and warnings. See `nullscan-workspace/src/json.rs`
-for the exact shape.
+summary counts, duplicate locations and warnings. The full shape is documented in
+[docs/json.md](./docs/json.md).
 
 ```sh
 cargo run -p nullscan -- src/ --format json | jq .summary
 ```
+
+Add `--max-diagnostics 200` to cap per-file output in CI; the JSON summary then reports
+`truncated: true`. Duplicate findings are never capped.
+
+## Install the CLI
+
+Every release ships raw binaries for Linux (x64 and arm64) plus `checksums.txt`. Download
+the asset for your machine from [Releases](https://github.com/bytezer/nullscan/releases),
+verify it, and put it on `PATH`:
+
+```sh
+curl -LO https://github.com/bytezer/nullscan/releases/download/v0.1.0-beta.4/nullscan-x86_64-unknown-linux-gnu
+curl -LO https://github.com/bytezer/nullscan/releases/download/v0.1.0-beta.4/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+chmod +x nullscan-x86_64-unknown-linux-gnu
+sudo mv nullscan-x86_64-unknown-linux-gnu /usr/local/bin/nullscan
+```
+
+During the current beta only the two Linux targets are built; macOS and Windows can build
+from source with `cargo build --release -p nullscan`. See [docs/cli.md](./docs/cli.md#install)
+for details.
 
 ## Editor integration
 
@@ -71,12 +93,12 @@ NULLSCAN_LSP_PATH=$(pwd)/target/debug/nullscan-lsp pnpm --dir editors/vscode tes
 
 ## Install the VS Code extension
 
-Every release ships a VSIX plus the matching language server binaries. Download the
-`.vsix` from [Releases](https://github.com/bytezer/nullscan/releases) and install it from a
-terminal:
+Every release ships a VSIX plus the matching language server binaries for Linux. Download
+the `.vsix` from [Releases](https://github.com/bytezer/nullscan/releases) and install it from
+a terminal:
 
 ```sh
-code --install-extension nullscan-0.1.0.vsix
+code --install-extension nullscan-0.1.0-beta.4.vsix
 ```
 
 Or use **Extensions** → **…** → **Install from VSIX…** in VS Code. On first use the
@@ -86,7 +108,7 @@ download of the same release, or `PATH`; the download is checked against the rel
 
 ## Configuration
 
-Drop a `nullscan.toml` next to where you run the CLI (or point at one with
+Drop a `nullscan.toml` in the directory you run nullscan from (or point at one with
 `--config path/to/file.toml`) to disable rules, override thresholds or exclude paths.
 Everything is optional; anything omitted keeps its built-in default:
 
@@ -94,44 +116,27 @@ Everything is optional; anything omitted keeps its built-in default:
 [rules]
 disabled = ["no-console", "no-var"]
 
-# Literal values that no-duplicate-string should not count, matched without quotes.
-[rules.no-duplicate-string]
-ignore = ["transparent", "currentColor"]
-
 [thresholds]
 cognitive-complexity = 20        # default: 15
 duplicate-code-min-tokens = 50   # default: 30
-duplicate-string-threshold = 3   # default: 3
-duplicate-string-min-length = 10 # default: 10
-max-switch-cases = 10            # default: 10
-no-small-switch-min-cases = 3    # default: 3
 
-# Excluded from every analysis (file rules and duplicate detection).
 [files]
 ignore = ["tests/**", "**/*.test.ts", "src/generated/**"]
 
-# Still analyzed for rules, but excluded from clone detection.
 [duplicates]
 ignore = ["tests/mocks/**", "**/__fixtures__/**"]
 compare-markup = false           # default: false
 ```
 
-An unknown name in `disabled` prints a warning (likely a typo) but doesn't fail the
-run. Disabling `duplicate-code` skips that pass entirely rather than just hiding its
-output, since it's the most expensive rule to compute.
+The complete reference — every key with its type, default and effect, how the file is
+resolved, glob syntax, error/warning behavior and recipes — is in
+[docs/configuration.md](./docs/configuration.md).
 
-Duplicate detection counts executable logic. JSX markup — tags, attributes, attribute
-strings, text, static JSX and `<svg>` contents — is data and does not count, so two
-components that only share an icon are not clones; logic inside `{...}` expressions
-still counts. Set `compare-markup = true` to restore the older behavior that compared
-markup tokens too.
-
-Ignore patterns are relative to the directory that contains `nullscan.toml` (or the
-working directory when there is no config file). `*` and `?` stay inside one path
-segment, `**` spans any number of segments, a trailing `/` covers the whole subtree, and
-a pattern without `/` matches any segment, so `tests` covers both `tests/` and
-`src/tests/`. `[files].ignore` removes files from the run entirely; `[duplicates].ignore`
-keeps them analyzed but out of clone detection, which is what fixtures and mocks need.
+Disabling `duplicate-code` skips the cross-file clone pass entirely rather than computing
+and hiding it, since it is the most expensive rule. Duplicate detection counts executable
+logic: JSX markup (tags, attributes, text, static JSX, `<svg>`) is data and does not count,
+so two components that only share an icon are not clones, while logic inside `{...}`
+expressions still counts. Set `compare-markup = true` to compare markup tokens too.
 
 ## Duplication metric
 
@@ -157,7 +162,8 @@ least one duplicated line, and `largestBlockLines` the biggest clone.
 
 Per-block messages show both units: `duplicated block of 42 lines (312 tokens)`. The text
 formatter prints them like any other diagnostic (`file:line:column: [duplicate-code] …`),
-and the VS Code summary panel renders the density with a bar and the same breakdown.
+and the VS Code summary panel renders the density with a bar and the same breakdown. Every
+field is documented in [docs/json.md](./docs/json.md#duplication).
 
 ## Suppressing findings
 
@@ -217,6 +223,8 @@ project-scoped `duplicate-code`).
 | `non-existent-operator` | `=+`, `=-`, or `=!` typos |
 | `no-self-assign` | Assignment of a value to itself |
 | `no-constant-condition` | Constant `if`/ternary condition |
+| `no-literal-call` | A literal value called as a function |
+| `no-useless-increment` | `x++`/`x += 1` whose result is discarded |
 | `use-isnan` | Comparison with `NaN` instead of `Number.isNaN` |
 | `no-array-constructor` | Ambiguous `Array(...)` / `new Array(...)` calls |
 | `no-new-wrappers` | `new String(...)`, `new Number(...)`, `new Boolean(...)` |
@@ -229,11 +237,13 @@ project-scoped `duplicate-code`).
 | `no-unreachable` | Statement that can never execute after a terminating statement |
 | `no-fallthrough` | Non-empty `switch` case that can fall into the next case |
 | `consistent-return` | Function that returns a value on some paths but not others |
+| `no-generator-without-yield` | Generator function that never yields a value |
 | `no-one-iteration-loop` | Loop that unconditionally exits on its first iteration |
 | `no-unused-collection` | Local collection that is only mutated, never read |
 | `no-element-overwrite` | Adjacent assignment overwrites the same target without a read |
 | `no-ignored-return` | Discarded return value of a known pure function |
 | `no-gratuitous-expressions` | `a && a`, `a || !a`, etc. in a condition |
+| `no-unthrown-error` | `new Error(...)` that is never thrown |
 | `no-eval` | Direct `eval(...)` calls, including `window.eval` and friends |
 | `no-implied-eval` | `setTimeout`/`setInterval`/`setImmediate`/`execScript` called with a string |
 | `no-new-func` | `new Function(...)` and `Function(...)` |
@@ -317,6 +327,8 @@ What's shipped, and what's next.
 - [x] `non-existent-operator` — `=+`, `=-`, `=!` typos
 - [x] `no-self-assign` — self-assignment
 - [x] `no-constant-condition` — constant `if`/ternary conditions
+- [x] `no-literal-call` — literals called as functions
+- [x] `no-useless-increment` — discarded increments
 - [x] `use-isnan` — `NaN` comparisons
 - [x] `no-array-constructor` — ambiguous `Array` constructors
 - [x] `no-new-wrappers` — primitive wrapper objects
@@ -329,11 +341,13 @@ What's shipped, and what's next.
 - [x] `no-unreachable` — statements after a terminating jump
 - [x] `no-fallthrough` — `switch` cases that fall into the next case
 - [x] `consistent-return` — mixed valued and bare/falling-off returns
+- [x] `no-generator-without-yield` — generators that never yield
 - [x] `no-one-iteration-loop` — loops that exit on their first iteration
 - [x] `no-unused-collection` — collections that are only mutated
 - [x] `no-element-overwrite` — adjacent assignments to the same target
 - [x] `no-ignored-return` — discarded pure return values
 - [x] `no-gratuitous-expressions` — constant `&&`/`||` conditions
+- [x] `no-unthrown-error` — errors created but never thrown
 - [x] `no-eval` — direct `eval` calls
 - [x] `no-implied-eval` — timers called with a string
 - [x] `no-new-func` — `Function` constructor

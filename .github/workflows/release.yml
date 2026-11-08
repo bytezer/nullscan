@@ -45,15 +45,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             ext: ""
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            ext: ""
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            ext: ""
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            ext: ".exe"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,7 +116,7 @@ jobs:
           merge-multiple: true
       - name: Verify assets and write checksums
         env:
-          TARGETS: "x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc"
+          TARGETS: "x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
         run: |
           set -euo pipefail
           mkdir -p publish
@@ -156,8 +147,8 @@ jobs:
             exit 1
           fi
           count=$(find publish -maxdepth 1 -type f | wc -l)
-          if [ "$count" -ne 11 ]; then
-            echo "::error::Expected 11 release assets, found $count"
+          if [ "$count" -ne 5 ]; then
+            echo "::error::Expected 5 release assets, found $count"
             find publish -maxdepth 1 -type f -printf '%f\n' | sort
             exit 1
           fi
@@ -178,7 +169,7 @@ jobs:
           body: |
             Version `${{ env.TAG }}`.
 
-            - `nullscan-<triple>` and `nullscan-lsp-<triple>` (`.exe` on Windows): raw CLI and language server binaries for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`.
+            - `nullscan-<triple>` and `nullscan-lsp-<triple>`: raw CLI and language server binaries for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`. macOS and Windows targets are not built during the beta.
             - `checksums.txt`: SHA-256 of every asset here; the VS Code extension reads it to verify the language server it downloads.
             - `nullscan-<version>.vsix`: the VS Code extension. Install it with `code --install-extension <file>`.
 

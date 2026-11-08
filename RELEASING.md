@@ -44,19 +44,22 @@ Members use `version.workspace = true` and the internal path dependencies carry 
    compares the rest with both version sources.
 
 4. Watch the **Release** workflow (`.github/workflows/release.yml`) in the Actions tab.
-   `verify` runs first; `build` (five targets), `vsix` and `release` run after it.
+   `verify` runs first; `build` (two Linux targets), `vsix` and `release` run after it.
 
 5. Verify the published release contains all of this:
 
-   - five pairs of raw binaries — `nullscan-<triple>` and `nullscan-lsp-<triple>`, with an
-     `.exe` suffix on Windows — for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
-     `x86_64-apple-darwin`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`;
-   - `checksums.txt` with one `<sha256>  <asset>` line for each of the 11 other assets
-     (the manifest does not hash itself), so the release holds 12 files in total;
+   - two pairs of raw binaries — `nullscan-<triple>` and `nullscan-lsp-<triple>` — for
+     `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`;
+   - `checksums.txt` with one `<sha256>  <asset>` line for each of the 5 other assets
+     (the manifest does not hash itself), so the release holds 6 files in total;
    - `nullscan-<version>.vsix`.
 
    The `release` job fails before publishing if any expected asset is missing or if the
-   staging directory does not hold exactly 11 files (10 binaries plus the VSIX).
+   staging directory does not hold exactly 5 files (4 binaries plus the VSIX).
+
+   macOS and Windows targets are intentionally not built during the beta; re-add their
+   matrix entries and the matching `TARGETS`/count checks in `release.yml` before shipping
+   them again.
 
    `checksums.txt` is not cosmetic: `editors/vscode/src/download.ts` fetches it first and
    verifies the SHA-256 of the `nullscan-lsp-<triple>` it downloads against it. A missing

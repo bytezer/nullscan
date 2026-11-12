@@ -104,6 +104,8 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
 - `no-array-constructor` / `no-new-wrappers` only match bare `Array`, `String`, `Number`,
   and `Boolean` identifiers.
 - `no-duplicate-imports` compares exact module source strings and ignores `export ... from`.
+  An `import type` and a value import of the same module may coexist; inline
+  `import { type T }` counts as a value import.
 - `no-unreachable` only recognises `return`, `throw`, `break`, `continue`, a block whose last
   executing statement terminates, and an `if` whose two branches both terminate. `try`,
   `switch`, and loops are never treated as terminating, so code after them is not reported.

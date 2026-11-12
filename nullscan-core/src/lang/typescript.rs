@@ -553,6 +553,16 @@ mod tests {
     }
 
     #[test]
+    fn type_only_imports_are_tracked_apart_from_value_imports() {
+        let split = "import { a } from \"./a\";\nimport type { T } from \"./a\";\nconst x: T = a;\nuse(x);";
+        assert!(rules(split).is_empty());
+        let inline = "import { a } from \"./a\";\nimport { type T } from \"./a\";\nconst x: T = a;\nuse(x);";
+        assert_eq!(rules(inline), vec!["no-duplicate-imports"]);
+        let two_types = "import type { T } from \"./a\";\nimport type { U } from \"./a\";\nconst x: T | U = 1;\nuse(x);";
+        assert_eq!(rules(two_types), vec!["no-duplicate-imports"]);
+    }
+
+    #[test]
     fn flags_unused_imports_and_local_variables() {
         assert_eq!(
             rules("import { unused } from \"./m\";"),

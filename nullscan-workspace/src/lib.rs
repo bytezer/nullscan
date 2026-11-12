@@ -8,6 +8,7 @@
 pub mod config;
 pub mod ignore;
 pub mod json;
+pub mod modules;
 pub mod scan;
 pub mod walk;
 

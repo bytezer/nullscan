@@ -10,19 +10,28 @@
 //!   of the enclosing class;
 //! - a chain ending in `.then(onFulfilled)` with one argument or in `.finally(...)`,
 //!   whatever the receiver;
-//! - an async IIFE.
+//! - an async IIFE;
+//! - a call whose callee has a declared function type returning a promise, found only
+//!   through explicit annotations: an annotated parameter or `const x: T`, object
+//!   destructuring of such a value, and `a.b` / `a?.b` member access, following `type`
+//!   aliases, interfaces and relative imports (see `type_summary`); plus functions
+//!   imported by name, or through `import * as ns`, that the other file exports as
+//!   `async`/`Promise<...>`.
 //!
 //! `await`, `void`, `.catch(...)`, `.then(a, b)`, and any value that is not a bare
 //! statement are never reported. Statements built from `,`, `&&`, `||` or `?:` are
-//! skipped, and members or functions imported from other files are not detected.
+//! skipped. There is no inference: generics, `ReturnType<...>`, unannotated values, class
+//! instances and bare-specifier or `node_modules` modules are not followed.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tree_sitter::Node;
 
 use crate::Diagnostic;
 use crate::rule::FileContext;
 use crate::scope::ScopeGraph;
+use crate::type_summary::{ModuleSummary, Typed, Types, declares_promise};
 
 use super::{named_children_without_comments, node_text, report_at};
 
@@ -35,6 +44,7 @@ struct Checker<'a> {
     source: &'a str,
     /// Reference offset -> binding offset, for references that resolved in this file.
     bound: HashMap<usize, usize>,
+    types: Types<'a>,
 }
 
 pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
@@ -45,10 +55,16 @@ pub fn run(ctx: &FileContext<'_>) -> Vec<Diagnostic> {
         root: ctx.tree.root_node(),
         source: ctx.source,
         bound: bound_offsets(scopes),
+        types: Types::new(local_summary(ctx), ctx.resolver),
     };
     let mut out = Vec::new();
     walk(ctx.tree.root_node(), &checker, &mut out);
     out
+}
+
+fn local_summary(ctx: &FileContext<'_>) -> Arc<ModuleSummary> {
+    let path = ctx.file.map(|p| p.to_path_buf());
+    Arc::new(ModuleSummary::from_tree(ctx.tree, ctx.source, path))
 }
 
 fn bound_offsets(scopes: &ScopeGraph) -> HashMap<usize, usize> {
@@ -89,29 +105,6 @@ fn is_async(function: Node<'_>) -> bool {
     function.children(&mut cursor).any(|c| c.kind() == "async")
 }
 
-fn is_promise_type(node: Node<'_>, source: &str) -> bool {
-    match node.kind() {
-        "type_annotation" | "parenthesized_type" => {
-            node.named_child(0).is_some_and(|n| is_promise_type(n, source))
-        }
-        "union_type" => named_children_without_comments(node)
-            .into_iter()
-            .any(|n| is_promise_type(n, source)),
-        "generic_type" => node
-            .child_by_field_name("name")
-            .is_some_and(|n| node_text(n, source) == "Promise"),
-        _ => false,
-    }
-}
-
-/// Whether a function-like node is `async` or declares a `Promise<...>` return type.
-fn returns_promise(function: Node<'_>, source: &str) -> bool {
-    is_async(function)
-        || function
-            .child_by_field_name("return_type")
-            .is_some_and(|t| is_promise_type(t, source))
-}
-
 fn argument_count(call: Node<'_>) -> usize {
     call.child_by_field_name("arguments")
         .map_or(0, |a| named_children_without_comments(a).len())
@@ -136,7 +129,12 @@ impl<'a> Checker<'a> {
 
     fn is_promise_callee(&self, callee: Node<'a>, call: Node<'a>) -> bool {
         match callee.kind() {
-            "identifier" => self.is_global(callee, "fetch") || self.local_returns_promise(callee),
+            "identifier" => {
+                self.is_global(callee, "fetch")
+                    || self.local_returns_promise(callee)
+                    || self.imported_returns_promise(callee)
+                    || self.is_typed_promise_fn(callee)
+            }
             "parenthesized_expression" => {
                 let inner = unwrap_parens(callee);
                 matches!(inner.kind(), "arrow_function" | "function_expression" | "function")
@@ -158,11 +156,105 @@ impl<'a> Checker<'a> {
         match name {
             "finally" => true,
             "then" => argument_count(call) == 1,
-            _ if object.kind() == "identifier" => {
-                PROMISE_STATICS.contains(&name) && self.is_global(object, "Promise")
+            _ => {
+                self.is_promise_static(object, name)
+                    || (object.kind() == "this" && self.class_method_returns_promise(callee, name))
+                    || self.is_namespace_promise_fn(object, name)
+                    || self.is_typed_promise_fn(callee)
             }
-            _ if object.kind() == "this" => self.class_method_returns_promise(callee, name),
-            _ => false,
+        }
+    }
+
+    fn is_promise_static(&self, object: Node<'a>, name: &str) -> bool {
+        object.kind() == "identifier"
+            && PROMISE_STATICS.contains(&name)
+            && self.is_global(object, "Promise")
+    }
+
+    /// The identifier's binding when it is an import of this file.
+    fn import_name(&self, identifier: Node<'a>) -> Option<&'a str> {
+        let name = self.binding_name(identifier)?;
+        matches!(name.parent()?.kind(), "import_specifier" | "namespace_import" | "import_clause")
+            .then(|| node_text(identifier, self.source))
+    }
+
+    fn imported_returns_promise(&self, identifier: Node<'a>) -> bool {
+        self.import_name(identifier)
+            .is_some_and(|local| self.types.imported_fn_returns_promise(local))
+    }
+
+    fn is_namespace_promise_fn(&self, object: Node<'a>, member: &str) -> bool {
+        object.kind() == "identifier"
+            && self
+                .import_name(object)
+                .is_some_and(|ns| self.types.namespace_fn_returns_promise(ns, member))
+    }
+
+    /// Whether the callee's declared type is a function returning a promise.
+    fn is_typed_promise_fn(&self, callee: Node<'a>) -> bool {
+        self.type_of(callee).is_some_and(|t| self.types.is_promise_fn(&t))
+    }
+
+    /// The node declaring the binding a reference resolved to.
+    fn binding_name(&self, identifier: Node<'a>) -> Option<Node<'a>> {
+        let offset = *self.bound.get(&identifier.start_byte())?;
+        self.root.descendant_for_byte_range(offset, offset)
+    }
+
+    /// The declared type of an expression, read only from explicit annotations.
+    fn type_of(&self, expr: Node<'a>) -> Option<Typed> {
+        match expr.kind() {
+            "identifier" => self.name_type(self.binding_name(expr)?),
+            "parenthesized_expression" | "non_null_expression" => self.type_of(expr.named_child(0)?),
+            "member_expression" => {
+                let object = self.type_of(expr.child_by_field_name("object")?)?;
+                let property = expr.child_by_field_name("property")?;
+                self.types.member(&object, node_text(property, self.source))
+            }
+            _ => None,
+        }
+    }
+
+    /// The declared type of the binding introduced by `name`.
+    fn name_type(&self, name: Node<'a>) -> Option<Typed> {
+        let parent = name.parent()?;
+        match parent.kind() {
+            "required_parameter" | "optional_parameter" | "variable_declarator" => self.declared(parent),
+            "object_pattern" => self.pattern_member(parent, node_text(name, self.source)),
+            "object_assignment_pattern" => {
+                self.pattern_member(parent.parent()?, node_text(name, self.source))
+            }
+            "pair_pattern" => {
+                let key = node_text(parent.child_by_field_name("key")?, self.source);
+                self.pattern_member(parent.parent()?, key)
+            }
+            _ => None,
+        }
+    }
+
+    /// An annotated parameter or declarator; an unannotated `const` takes the declared
+    /// type of its initializer when that is itself an annotated reference.
+    fn declared(&self, declaration: Node<'a>) -> Option<Typed> {
+        if let Some(annotation) = declaration.child_by_field_name("type") {
+            return Some(self.types.from_node(annotation, self.source));
+        }
+        self.type_of(declaration.child_by_field_name("value")?)
+    }
+
+    fn pattern_member(&self, pattern: Node<'a>, key: &str) -> Option<Typed> {
+        let base = self.pattern_type(pattern)?;
+        self.types.member(&base, key)
+    }
+
+    fn pattern_type(&self, pattern: Node<'a>) -> Option<Typed> {
+        let parent = pattern.parent()?;
+        match parent.kind() {
+            "required_parameter" | "optional_parameter" | "variable_declarator" => self.declared(parent),
+            "pair_pattern" => {
+                let key = node_text(parent.child_by_field_name("key")?, self.source);
+                self.pattern_member(parent.parent()?, key)
+            }
+            _ => None,
         }
     }
 
@@ -178,13 +270,13 @@ impl<'a> Checker<'a> {
         };
         match parent.kind() {
             "function_declaration" | "generator_function_declaration" => {
-                returns_promise(parent, self.source)
+                declares_promise(parent, self.source)
             }
             "variable_declarator" => parent
                 .child_by_field_name("value")
                 .is_some_and(|v| {
                     matches!(v.kind(), "arrow_function" | "function_expression" | "function")
-                        && returns_promise(v, self.source)
+                        && declares_promise(v, self.source)
                 }),
             _ => false,
         }
@@ -198,7 +290,7 @@ impl<'a> Checker<'a> {
                     m.kind() == "method_definition"
                         && m.child_by_field_name("name")
                             .is_some_and(|n| node_text(n, self.source) == name)
-                        && returns_promise(m, self.source)
+                        && declares_promise(m, self.source)
                 });
             }
             current = node.parent();

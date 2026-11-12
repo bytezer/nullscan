@@ -7,10 +7,13 @@
 //! Adding a rule means adding one implementation module plus one entry here; there is no
 //! second place to update.
 
+use std::path::Path;
+
 use tree_sitter::Tree;
 
 use crate::lang::typescript::rules;
 use crate::scope::ScopeGraph;
+use crate::type_summary::ModuleResolver;
 use crate::{Config, Diagnostic, Severity};
 
 /// Everything a per-file rule needs to inspect one parsed file.
@@ -23,6 +26,10 @@ pub struct FileContext<'a> {
     pub config: &'a Config,
     /// Present only when at least one enabled file rule declares `requires_scope`.
     pub scopes: Option<&'a ScopeGraph>,
+    /// Path of the analyzed file, when the caller knows it.
+    pub file: Option<&'a Path>,
+    /// Cross-file module lookup, when the caller provides one.
+    pub resolver: Option<&'a dyn ModuleResolver>,
 }
 
 /// Fixed metadata every rule exposes to the analyzer, SARIF, and config validation.

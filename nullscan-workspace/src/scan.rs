@@ -11,11 +11,12 @@ use std::time::{Duration, Instant};
 
 use nullscan_core::{
     Config, Diagnostic, Duplicate, DuplicateOptions, DuplicateReport, DuplicationStats, Language,
-    analyze, find_duplicates,
+    AnalyzeOptions, analyze_with, find_duplicates,
 };
 use rayon::prelude::*;
 
 use crate::ignore::PathFilter;
+use crate::modules::WorkspaceResolver;
 use crate::walk;
 
 /// Everything a caller can control about a scan.
@@ -70,6 +71,7 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
     let walked = walk::collect_files(options.paths, options.files_ignore);
     let mut warnings = walked.warnings;
 
+    let resolver = WorkspaceResolver::new(options.overrides);
     let results: Vec<Option<Result<FileResult, String>>> = walked
         .files
         .par_iter()
@@ -81,7 +83,7 @@ pub fn scan(options: ScanOptions<'_>) -> ScanReport {
                 file,
                 *language,
                 &options.config,
-                options.overrides,
+                (options.overrides, &resolver),
             ))
         })
         .collect();
@@ -197,10 +199,11 @@ fn read_and_analyze(
     file: &Path,
     language: Language,
     config: &Config,
-    overrides: Option<&HashMap<PathBuf, String>>,
+    (overrides, resolver): (Option<&HashMap<PathBuf, String>>, &WorkspaceResolver<'_>),
 ) -> Result<FileResult, String> {
     let source = read_source(file, overrides)?;
-    let diagnostics = analyze(&source, language, config);
+    let context = AnalyzeOptions { file: Some(file), resolver: Some(resolver) };
+    let diagnostics = analyze_with(&source, language, config, context);
     Ok(FileResult {
         file: file.to_path_buf(),
         language,
@@ -559,6 +562,61 @@ mod tests {
         assert_eq!(report.files[0].file, root.join("src/a.ts"));
         assert_eq!(report.files[0].diagnostics.len(), 1);
         assert!(report.warnings.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    const PERSISTENCE_TYPES: &str = "export type TableLayout = { cols: string[] };\n\
+        export type TablePersistence = { layout: TableLayout | null | undefined; onSave: (layout: TableLayout) => void | Promise<void> };\n";
+
+    fn hook_source(prefix: &str) -> String {
+        format!(
+            "import type {{ TablePersistence as Persist }} from \"./types/Table\";\n\
+             export function useConfig(params: {{ persistence?: Persist }}) {{\n\
+             const {{ persistence }} = params;\n\
+             const save = (next: number) => {{ {prefix}persistence?.onSave(next as never); }};\n\
+             {prefix}persistence.onSave(1 as never);\n  return save;\n}}\n"
+        )
+    }
+
+    fn floating_lines(report: &ScanReport, file: &str) -> Vec<usize> {
+        let file = report.files.iter().find(|f| f.file.ends_with(file)).expect("file scanned");
+        file.diagnostics
+            .iter()
+            .filter(|d| d.rule == "no-floating-promises")
+            .map(|d| d.line)
+            .collect()
+    }
+
+    #[test]
+    fn follows_annotated_types_across_relative_imports() {
+        let root = temp_dir("floating-cross-file");
+        fs::create_dir_all(root.join("types")).expect("create types dir");
+        fs::write(root.join("types/Table.ts"), PERSISTENCE_TYPES).expect("write types");
+        fs::write(root.join("hook.ts"), hook_source("")).expect("write hook");
+
+        let report = scan(options(&[root.clone()], Config::default(), None));
+        assert_eq!(floating_lines(&report, "hook.ts"), vec![4, 5]);
+
+        fs::write(root.join("hook.ts"), hook_source("void ")).expect("rewrite hook");
+        let report = scan(options(&[root.clone()], Config::default(), None));
+        assert!(floating_lines(&report, "hook.ts").is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn open_buffers_override_imported_modules_on_disk() {
+        let root = temp_dir("floating-overrides");
+        fs::create_dir_all(root.join("types")).expect("create types dir");
+        fs::write(root.join("types/Table.ts"), PERSISTENCE_TYPES).expect("write types");
+        fs::write(root.join("hook.ts"), hook_source("")).expect("write hook");
+        let dirty = PERSISTENCE_TYPES.replace("| Promise<void>", "");
+        let overrides = HashMap::from([(root.join("types/Table.ts"), dirty)]);
+
+        let report = scan(ScanOptions {
+            overrides: Some(&overrides),
+            ..options(&[root.clone()], Config::default(), None)
+        });
+        assert!(floating_lines(&report, "hook.ts").is_empty());
         let _ = fs::remove_dir_all(root);
     }
 

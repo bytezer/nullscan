@@ -1050,6 +1050,52 @@ mod tests {
         assert!(rules("class A { m() {} n() { this.m(); } }").is_empty());
     }
 
+    const PERSISTENCE: &str = "type P = { onSave: (l: number) => void | Promise<void>; sync: () => void };\n\
+        interface Api { load(): Promise<void>; plain(): void; nested?: P | null }\n";
+
+    #[test]
+    fn flags_promises_from_declared_types() {
+        for body in [
+            "function f(p: P) { p.onSave(1); }",
+            "function f(p?: P) { p?.onSave(1); }",
+            "function f(p: P | null) { p!.onSave(1); }",
+            "function f({ onSave }: P) { onSave(1); }",
+            "function f(p: P) { const { onSave } = p; onSave(1); }",
+            "function f(p: P) { const { onSave: save } = p; save(1); }",
+            "function f(params: { persistence?: P }) { const { persistence } = params; persistence?.onSave(1); }",
+            "function f(params: { persistence?: P }) { const { persistence } = params; use(() => { persistence.onSave(1); }); }",
+            "function f(a: Api) { a.load(); }",
+            "function f(a: Api) { a.nested?.onSave(1); }",
+            "const p: P = make(); p.onSave(1);",
+            "function f(cb: () => Promise<void>) { cb(); }",
+            "type Alias = P; function f(p: Alias) { p.onSave(1); }",
+            "interface Sub extends Api {} function f(s: Sub) { s.load(); }",
+        ] {
+            let source = format!("{PERSISTENCE}{body}");
+            assert_eq!(rules(&source), vec!["no-floating-promises"], "{body}");
+        }
+    }
+
+    #[test]
+    fn ignores_handled_or_undeclared_promise_members() {
+        for body in [
+            "function f(p: P) { void p.onSave(1); }",
+            "async function f(p: P) { await p.onSave(1); }",
+            "function f(p: P) { p.onSave(1).catch(h); }",
+            "function f(p: P) { p.sync(); }",
+            "function f(a: Api) { a.plain(); }",
+            "function f(p) { p.onSave(1); }",
+            "function f(p: Unknown) { p.onSave(1); }",
+            "function f(p: P) { p.missing(); }",
+            "function f(p: P) { const q = make(p); q.onSave(1); }",
+            "type Loop = Loop2; type Loop2 = Loop; function f(p: Loop) { p.onSave(1); }",
+            "function f() { const p = make(); p.onSave(1); }",
+        ] {
+            let source = format!("{PERSISTENCE}{body}");
+            assert!(!rules(&source).contains(&"no-floating-promises"), "{body}");
+        }
+    }
+
     #[test]
     fn flags_gratuitous_conditions() {
         // `no-identical-expressions` also legitimately fires on `a && a`.

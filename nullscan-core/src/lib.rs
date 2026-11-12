@@ -1,3 +1,5 @@
+use std::path::Path;
+
 mod cognitive_complexity;
 mod config;
 mod control_flow;
@@ -10,6 +12,7 @@ mod rule;
 mod scope;
 mod suppression;
 mod text;
+mod type_summary;
 
 pub use config::Config;
 pub use duplication::{
@@ -22,6 +25,7 @@ pub use scope::{
     Binding, BindingKind, Declarator, Reference, Scope, ScopeGraph, ScopeId, ScopeKind,
 };
 pub use text::byte_col_to_utf16;
+pub use type_summary::{ModuleResolver, ModuleSummary, summarize};
 
 /// How serious a diagnostic is. Ordered from most to least severe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,11 +61,30 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+/// Optional cross-file context for [`analyze_with`].
+#[derive(Default, Clone, Copy)]
+pub struct AnalyzeOptions<'a> {
+    /// The file being analyzed; relative imports resolve against it.
+    pub file: Option<&'a Path>,
+    /// Turns imports into other files' summaries. Without one, only same-file types count.
+    pub resolver: Option<&'a dyn ModuleResolver>,
+}
+
 /// Parses `source` as `language` and runs every file-scoped rule not disabled by `config`.
 ///
 /// Diagnostics covered by a `nullscan-ignore-next-line` or `nullscan-ignore-line` comment
 /// (see the `suppression` module) are dropped before returning.
 pub fn analyze(source: &str, language: Language, config: &Config) -> Vec<Diagnostic> {
+    analyze_with(source, language, config, AnalyzeOptions::default())
+}
+
+/// [`analyze`] with a file path and a module resolver for rules that follow imports.
+pub fn analyze_with(
+    source: &str,
+    language: Language,
+    config: &Config,
+    options: AnalyzeOptions<'_>,
+) -> Vec<Diagnostic> {
     let tree = language.parse(source).expect("parse failed");
 
     // Build the scope graph only when an enabled file-scoped rule actually needs it.
@@ -77,6 +100,8 @@ pub fn analyze(source: &str, language: Language, config: &Config) -> Vec<Diagnos
         source,
         config,
         scopes: scopes.as_ref(),
+        file: options.file,
+        resolver: options.resolver,
     };
 
     let mut diagnostics = Vec::new();

@@ -28,7 +28,8 @@ use lsp_types::{
     },
     request::{CodeActionRequest, HoverRequest, Request as _},
 };
-use nullscan_core::{Language, analyze};
+use nullscan_core::{AnalyzeOptions, Language, analyze_with};
+use nullscan_workspace::modules::WorkspaceResolver;
 use nullscan_workspace::config;
 use nullscan_workspace::json::summary_json;
 use serde::de::DeserializeOwned;
@@ -555,13 +556,18 @@ impl Server {
             return Vec::new();
         };
         let loaded = self.config_for(uri);
-        if let Some(path) = to_file_path(uri) {
-            if loaded.ignore.matches(&path) {
+        let path = to_file_path(uri);
+        if let Some(path) = &path {
+            if loaded.ignore.matches(path) {
                 log::debug!("skipping ignored document {}", path.display());
                 return Vec::new();
             }
         }
-        analyze(text, language, &loaded.config)
+        // Open buffers override disk for imported modules, like in a workspace scan.
+        let overrides = self.overrides();
+        let resolver = WorkspaceResolver::new(Some(&overrides));
+        let context = AnalyzeOptions { file: path.as_deref(), resolver: Some(&resolver) };
+        analyze_with(text, language, &loaded.config, context)
             .iter()
             .map(|diagnostic| convert::to_lsp_diagnostic(text, diagnostic))
             .collect()

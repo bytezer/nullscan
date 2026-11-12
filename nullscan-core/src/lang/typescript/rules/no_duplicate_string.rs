@@ -6,6 +6,10 @@
 //! Literals listed in `Config::duplicate_string_ignore` are dropped before counting. The
 //! comparison uses the raw content with the surrounding quotes stripped and no escape
 //! decoding, so entries must be written the way they appear in the source.
+//!
+//! Like SonarJS, a string that is directly a JSX attribute value (`values="0 0 1"`) is not
+//! counted: markup such as exported SVGs repeats those values by design. A string inside
+//! an expression container (`attr={"x"}`) is still code and still counts.
 
 use std::collections::HashMap;
 
@@ -64,6 +68,9 @@ fn relevant_occurrences<'tree, 'src>(ctx: &'tree FileContext<'src>) -> Vec<Node<
         let capture = m.captures().iter().find(|c| c.index == report_idx).unwrap();
         // Measure and match the unquoted content; escape sequences stay encoded on both
         // sides, so an ignore entry is compared literally.
+        if is_jsx_attribute_value(capture.node) {
+            continue;
+        }
         let Some(content) = static_string_text(capture.node, ctx.source) else {
             continue;
         };
@@ -72,6 +79,10 @@ fn relevant_occurrences<'tree, 'src>(ctx: &'tree FileContext<'src>) -> Vec<Node<
         }
     }
     occurrences
+}
+
+fn is_jsx_attribute_value(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| parent.kind() == "jsx_attribute")
 }
 
 #[cfg(test)]
@@ -86,7 +97,11 @@ mod tests {
     }
 
     fn findings(source: &str, config: &Config) -> Vec<Diagnostic> {
-        crate::analyze(source, Language::TypeScript, config)
+        findings_in(source, Language::TypeScript, config)
+    }
+
+    fn findings_in(source: &str, language: Language, config: &Config) -> Vec<Diagnostic> {
+        crate::analyze(source, language, config)
             .into_iter()
             .filter(|diagnostic| diagnostic.rule == "no-duplicate-string")
             .collect()
@@ -168,5 +183,37 @@ mod tests {
         "#;
 
         assert!(findings(source, &config_ignoring(&["transparent"])).is_empty());
+    }
+
+    #[test]
+    fn jsx_attribute_values_are_not_counted() {
+        let source = r#"
+            export const Icon = (
+                <svg>
+                    <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" />
+                    <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" />
+                    <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" />
+                    <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" />
+                </svg>
+            );
+        "#;
+
+        assert!(findings_in(source, Language::Tsx, &Config::default()).is_empty());
+    }
+
+    #[test]
+    fn strings_in_jsx_expressions_still_count() {
+        let source = r#"
+            export const Icon = (
+                <svg>
+                    <path d={"M0 0 L10 10 Z repeated"} />
+                    <path d={"M0 0 L10 10 Z repeated"} />
+                    <path d={"M0 0 L10 10 Z repeated"} />
+                    <path d={"M0 0 L10 10 Z repeated"} />
+                </svg>
+            );
+        "#;
+
+        assert!(!findings_in(source, Language::Tsx, &Config::default()).is_empty());
     }
 }

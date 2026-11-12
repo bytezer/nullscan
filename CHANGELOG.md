@@ -8,6 +8,12 @@ pre-release versions such as `0.x.0-beta.1` for testers.
 
 ## [Unreleased]
 
+### Fixed
+
+- `no-duplicate-string` no longer counts strings that are directly a JSX attribute value,
+  such as the repeated `values` of `<feColorMatrix>` in exported SVGs; strings inside
+  `{...}` expressions still count, as in SonarJS.
+
 ## [0.1.0-beta.5] - 2026-11-12
 
 ### Added

@@ -20,7 +20,7 @@ Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-conso
 | <a id="no-explicit-any"></a>`no-explicit-any` | code smell | SonarJS S4204 `no-explicit-any`; typescript-eslint `no-explicit-any` | Implemented (file-scoped) |
 | <a id="no-empty-catch"></a>`no-empty-catch` | bug | SonarJS S2486 `no-ignored-exceptions`; ESLint `no-empty` (catch blocks) | Implemented (file-scoped) |
 | <a id="cognitive-complexity"></a>`cognitive-complexity` | metric | SonarJS S3776 `cognitive-complexity`; no ESLint core equivalent (ESLint `complexity` is cyclomatic) | Implemented (file-scoped) |
-| <a id="no-duplicate-string"></a>`no-duplicate-string` | code smell | SonarJS S1192 `no-duplicate-string` | Implemented (file-scoped) |
+| <a id="no-duplicate-string"></a>`no-duplicate-string` | code smell | SonarJS S1192 `no-duplicate-string` | Implemented (file-scoped; JSX attribute values are not counted) |
 | <a id="no-identical-conditions"></a>`no-identical-conditions` | bug | SonarJS S1862 `no-identical-conditions`; ESLint `no-dupe-else-if` | Implemented (file-scoped) |
 | <a id="no-redundant-boolean"></a>`no-redundant-boolean` | code smell | SonarJS S1125 `no-redundant-boolean` | Implemented (file-scoped) |
 | <a id="prefer-immediate-return"></a>`prefer-immediate-return` | code smell | SonarJS S1488 `prefer-immediate-return` | Implemented (file-scoped) |

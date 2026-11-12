@@ -39,6 +39,8 @@ Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-conso
 | <a id="non-existent-operator"></a>`non-existent-operator` | bug | SonarJS S2757 `non-existent-operator` | Implemented (file-scoped) |
 | <a id="no-self-assign"></a>`no-self-assign` | bug | SonarJS S1656 `no-self-assign`; ESLint `no-self-assign` | Implemented (file-scoped) |
 | <a id="no-constant-condition"></a>`no-constant-condition` | bug | ESLint `no-constant-condition`; no SonarJS equivalent | Implemented (file-scoped; `if` and ternary only) |
+| <a id="no-literal-call"></a>`no-literal-call` | bug | SonarJS S6958 `no-literal-call`; ESLint `no-literal-call` | Implemented (file-scoped; direct calls on literals only, no scope or type analysis) |
+| <a id="no-useless-increment"></a>`no-useless-increment` | bug | SonarJS S2123 `no-useless-increment`; ESLint `no-useless-increment` | Implemented (file-scoped; standalone increments only, `+=`/`-=` only) |
 | <a id="use-isnan"></a>`use-isnan` | bug | SonarJS S2688 `use-isnan`; ESLint `use-isnan` | Implemented (file-scoped) |
 | <a id="no-array-constructor"></a>`no-array-constructor` | code smell | SonarJS S1528 `array-constructor`; ESLint/typescript-eslint `no-array-constructor` | Implemented (file-scoped) |
 | <a id="no-new-wrappers"></a>`no-new-wrappers` | bug | SonarJS S1533 `no-primitive-wrappers`; ESLint `no-new-wrappers` | Implemented (file-scoped) |
@@ -51,11 +53,13 @@ Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-conso
 | <a id="no-unreachable"></a>`no-unreachable` | bug | SonarJS S1763 `no-unreachable`; ESLint `no-unreachable` | Implemented (file-scoped; `return`/`throw`/`break`/`continue`, terminating blocks and `if`/`else`; no `try`/`switch`/loop analysis) |
 | <a id="no-fallthrough"></a>`no-fallthrough` | bug | SonarJS S128 `no-fallthrough`; ESLint `no-fallthrough` | Implemented (file-scoped; non-final `case` only, empty cases allowed, comment opt-out) |
 | <a id="consistent-return"></a>`consistent-return` | bug | SonarJS S3801 `no-inconsistent-returns`; ESLint `consistent-return` | Implemented (file-scoped; path-insensitive) |
+| <a id="no-generator-without-yield"></a>`no-generator-without-yield` | bug | SonarJS S3531 `generator-without-yield`; ESLint `generator-without-yield` | Implemented (file-scoped; direct yields only) |
 | <a id="no-one-iteration-loop"></a>`no-one-iteration-loop` | code smell | SonarJS S1751 `no-one-iteration-loop`; ESLint `no-unreachable-loop` | Implemented (file-scoped; top-level unconditional exits only) |
 | <a id="no-unused-collection"></a>`no-unused-collection` | code smell | SonarJS S4030 `no-unused-collection`; no direct ESLint core equivalent | Implemented (file-scoped; scope analysis; local array/object/`Map`/`Set` only) |
 | <a id="no-element-overwrite"></a>`no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
 | <a id="no-ignored-return"></a>`no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
 | <a id="no-gratuitous-expressions"></a>`no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
+| <a id="no-unthrown-error"></a>`no-unthrown-error` | bug | SonarJS S3984 `no-unthrown-error`; ESLint `no-unthrown-error` | Implemented (file-scoped; scope analysis; plain `Error` global only, standalone creations and never-thrown bindings) |
 | <a id="no-eval"></a>`no-eval` | security | ESLint `no-eval`; no direct SonarJS equivalent | Implemented (file-scoped; direct calls and common global/member spellings only) |
 | <a id="no-implied-eval"></a>`no-implied-eval` | security | ESLint `no-implied-eval`; no direct SonarJS equivalent | Implemented (file-scoped; string literals and substitution-free templates only) |
 | <a id="no-new-func"></a>`no-new-func` | security | ESLint `no-new-func`; no direct SonarJS equivalent | Implemented (file-scoped; bare and common global/member forms) |
@@ -151,6 +155,30 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
   property access (`obj["password"]`), aliases, and non-string expressions such as
   `process.env.X` are ignored. Expect false positives for fixtures/documentation and false
   negatives for secrets built at runtime or hidden behind other names.
+- `no-literal-call` reports only a call whose callee is *directly* a literal (string,
+  number, boolean, `null`, `undefined`, object, array, regex, or a template literal
+  without substitutions), with parentheses unwrapped. A literal stored in a variable and
+  called later is not reported, because without type information nullscan cannot know
+  whether the variable holds a function. A member expression on a literal
+  (`"abc".toUpperCase()`) is not a literal call and is never reported. `new` expressions
+  are not calls and are never reported.
+- `no-useless-increment` only reports an increment or decrement that is the whole
+  expression of an expression statement. Increments used as a value, nested in another
+  expression, or used as a `for` loop update clause are not reported, and only the `+=`
+  and `-=` compound assignments are considered.
+- `no-generator-without-yield` counts only `yield` expressions written directly in the
+  generator's own body. A `yield` inside a nested function or a nested class body belongs
+  to that inner scope and does not silence the report. `yield*` counts as yielding, and
+  async generators are checked the same way. The rule is syntax-only, so an intentionally
+  empty generator (a mock or an interface stub) is still reported.
+- `no-unthrown-error` recognizes only the plain `Error` global: `AggregateError` and
+  custom error classes such as `new MyError(...)` are out of scope, because without type
+  information there is no way to know that they extend `Error`. It reports a standalone
+  `new Error(...)`/`Error(...)` expression statement and a variable declarator whose
+  binding is never thrown and never escapes. An error that is returned, passed to a
+  call, stored in a collection or object, assigned to a property, or read through a
+  member expression is never reported, because other code may throw it later. The rule
+  is not path-sensitive, and a binding that is written to is never reported.
 
 ### Scope-analysis limits
 

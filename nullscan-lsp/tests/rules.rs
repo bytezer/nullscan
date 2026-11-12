@@ -29,7 +29,7 @@ fn rules_request_returns_the_whole_catalog() {
         .as_array()
         .cloned()
         .expect("catalog array");
-    assert_eq!(catalog.len(), 52);
+    assert_eq!(catalog.len(), 56);
 
     let eqeqeq = catalog
         .iter()

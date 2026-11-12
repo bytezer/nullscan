@@ -1209,4 +1209,156 @@ mod tests {
         source.push_str(" default: return -1; } return 0; }");
         source
     }
+
+    #[test]
+    fn flags_literal_called_as_a_function() {
+        assert_eq!(rules("const a = 'onClick'();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = 42();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = true();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = null();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = undefined();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = { x: 1 }();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = [1, 2]();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = `static`();"), vec!["no-literal-call"]);
+    }
+
+    #[test]
+    fn flags_parenthesized_literal_called_as_a_function() {
+        assert_eq!(rules("const a = ('x')();"), vec!["no-literal-call"]);
+        assert_eq!(rules("const a = ((('x')))();"), vec!["no-literal-call"]);
+    }
+
+    #[test]
+    fn allows_non_literal_callees() {
+        // A literal stored in a variable may still hold a function, so it is not reported.
+        assert!(rules("const f = 'x';\nf();").is_empty());
+        // A member expression on a literal is a real method call.
+        assert!(rules("'abc'.toUpperCase();").is_empty());
+        // A template literal with a substitution is dynamic.
+        assert!(rules("const a = `${name}`();").is_empty());
+        // `new` is not a call.
+        assert!(rules("const a = new Date();").is_empty());
+    }
+
+    #[test]
+    fn flags_useless_increments() {
+        assert_eq!(rules("let count = 0;\ncount++;"), vec!["no-useless-increment"]);
+        assert_eq!(
+            rules("let count = 0;\ncount--;"),
+            vec!["no-useless-increment"]
+        );
+        assert_eq!(
+            rules("let count = 0;\ncount += 1;"),
+            vec!["no-useless-increment"]
+        );
+        assert_eq!(
+            rules("let count = 0;\ncount -= 1;"),
+            vec!["no-useless-increment"]
+        );
+        assert_eq!(
+            rules("let count = 0;\n--count;"),
+            vec!["no-useless-increment"]
+        );
+        assert_eq!(
+            rules("const obj = { count: 0 };\nobj.count++;"),
+            vec!["no-useless-increment"]
+        );
+    }
+
+    #[test]
+    fn allows_increments_whose_value_is_used() {
+        assert!(rules("let count = 0;\nconst next = count++;").is_empty());
+        assert!(rules("let count = 0;\nuse(count++);").is_empty());
+        assert!(rules("for (let i = 0; i < 10; i++) {}").is_empty());
+        assert!(rules("let count = 0;\ncount *= 2;").is_empty());
+    }
+
+    #[test]
+    fn flags_generators_that_never_yield() {
+        assert_eq!(
+            rules("function* g() { return 1; }"),
+            vec!["no-generator-without-yield"]
+        );
+        assert_eq!(
+            rules("function* g() {}"),
+            vec!["no-generator-without-yield"]
+        );
+        assert_eq!(
+            rules("const g = function* () { return 1; };"),
+            vec!["no-generator-without-yield"]
+        );
+    }
+
+    #[test]
+    fn flags_generator_methods_without_yield() {
+        assert_eq!(
+            rules("class A { *values() { return 1; } }"),
+            vec!["no-generator-without-yield"]
+        );
+        assert_eq!(
+            rules("const o = { *values() { return 1; } };"),
+            vec!["no-generator-without-yield"]
+        );
+    }
+
+    #[test]
+    fn allows_generators_that_yield() {
+        assert!(rules("function* g() { yield 1; }").is_empty());
+        assert!(rules("function* g() { yield* other(); }").is_empty());
+        assert!(rules("async function* g() { yield 1; }").is_empty());
+        assert!(rules("class A { *values() { yield 1; } }").is_empty());
+        assert!(rules("function plain() { return 1; }").is_empty());
+    }
+
+    #[test]
+    fn generator_without_yield_ignores_yields_in_nested_functions() {
+        assert_eq!(
+            rules("function* outer() { function inner() { yield 1; } inner(); }"),
+            vec!["no-generator-without-yield"]
+        );
+    }
+
+    #[test]
+    fn generator_without_yield_ignores_yields_in_nested_class_bodies() {
+        assert_eq!(
+            rules("function* outer() { class Inner { field = yield 1; } }"),
+            vec!["no-generator-without-yield"]
+        );
+    }
+
+    #[test]
+    fn flags_errors_that_are_created_and_dropped() {
+        assert_eq!(rules("new Error(\"failed\");"), vec!["no-unthrown-error"]);
+        assert_eq!(rules("Error(\"failed\");"), vec!["no-unthrown-error"]);
+        // A binding that is never used at all is never thrown either.
+        assert_eq!(
+            rules("function f() { const error = new Error(\"failed\"); }"),
+            vec!["no-unused-vars", "no-unthrown-error"]
+        );
+    }
+
+    #[test]
+    fn allows_errors_that_are_thrown_returned_or_passed_on() {
+        assert!(
+            rules("function f() { const error = new Error(\"failed\"); throw error; }").is_empty()
+        );
+        assert!(rules("function f() { return new Error(\"failed\"); }").is_empty());
+        assert!(rules("function f() { report(new Error(\"failed\")); }").is_empty());
+        // The error is stored in a collection, so another party may throw it later.
+        assert!(
+            !rules("function f() { const list = [new Error(\"failed\")]; use(list); }")
+                .contains(&"no-unthrown-error")
+        );
+        assert!(
+            !rules("function f() { const holder = { error: new Error(\"failed\") }; use(holder); }")
+                .contains(&"no-unthrown-error")
+        );
+    }
+
+    #[test]
+    fn ignores_custom_error_classes_and_aggregate_errors() {
+        assert!(rules("class MyError extends Error {}\nnew MyError(\"failed\");").is_empty());
+        assert!(rules("new AggregateError([]);").is_empty());
+    }
+
 }

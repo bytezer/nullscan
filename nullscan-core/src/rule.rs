@@ -380,6 +380,30 @@ pub const RULES: &[Rule] = &[
     },
     Rule {
         meta: RuleMeta {
+            id: "no-literal-call",
+            description: "Literal value is called as a function",
+            title: "Do not call literals",
+            why: "Calling a literal throws a TypeError at runtime; use a function instead.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_literal_call::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-useless-increment",
+            description: "Increment or decrement whose result is never used",
+            title: "Remove useless increments",
+            why: "An increment whose result is discarded has no effect on the value; remove it or use its result.",
+            severity: Severity::Info,
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_useless_increment::run),
+    },
+    Rule {
+        meta: RuleMeta {
             id: "use-isnan",
             description: "Comparison with 'NaN' instead of Number.isNaN",
             title: "Use Number.isNaN",
@@ -524,6 +548,18 @@ pub const RULES: &[Rule] = &[
     },
     Rule {
         meta: RuleMeta {
+            id: "no-generator-without-yield",
+            description: "Generator function never yields a value",
+            title: "Yield from every generator",
+            why: "A generator that never yields finishes on the first next() call, so callers get undefined instead of a sequence.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: false,
+        run: Some(rules::no_generator_without_yield::run),
+    },
+    Rule {
+        meta: RuleMeta {
             id: "no-one-iteration-loop",
             description: "Loop body always exits on its first iteration",
             title: "Remove single-pass loops",
@@ -581,6 +617,18 @@ pub const RULES: &[Rule] = &[
         scope: RuleScope::File,
         requires_scope: false,
         run: Some(rules::no_gratuitous_expressions::run),
+    },
+    Rule {
+        meta: RuleMeta {
+            id: "no-unthrown-error",
+            description: "Error object is created but never thrown",
+            title: "Throw the error you created",
+            why: "An error that is never thrown is silently swallowed, so the failure goes unnoticed; throw it or remove the creation.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_unthrown_error::run),
     },
     Rule {
         meta: RuleMeta {
@@ -786,6 +834,8 @@ mod tests {
             "non-existent-operator",
             "no-self-assign",
             "no-constant-condition",
+            "no-literal-call",
+            "no-useless-increment",
             "use-isnan",
             "no-array-constructor",
             "no-new-wrappers",
@@ -798,11 +848,13 @@ mod tests {
             "no-unreachable",
             "no-fallthrough",
             "consistent-return",
+            "no-generator-without-yield",
             "no-one-iteration-loop",
             "no-unused-collection",
             "no-element-overwrite",
             "no-ignored-return",
             "no-gratuitous-expressions",
+            "no-unthrown-error",
             "no-eval",
             "no-implied-eval",
             "no-new-func",
@@ -861,6 +913,8 @@ mod tests {
                 "non-existent-operator",
                 "no-self-assign",
                 "no-constant-condition",
+                "no-literal-call",
+                "no-useless-increment",
                 "use-isnan",
                 "no-array-constructor",
                 "no-new-wrappers",
@@ -873,11 +927,13 @@ mod tests {
                 "no-unreachable",
                 "no-fallthrough",
                 "consistent-return",
+                "no-generator-without-yield",
                 "no-one-iteration-loop",
                 "no-unused-collection",
                 "no-element-overwrite",
                 "no-ignored-return",
                 "no-gratuitous-expressions",
+                "no-unthrown-error",
                 "no-eval",
                 "no-implied-eval",
                 "no-new-func",
@@ -908,6 +964,7 @@ mod tests {
             "no-redeclare",
             "no-unused-collection",
             "no-array-index-key",
+            "no-unthrown-error",
         ] {
             let rule = RULES
                 .iter()
@@ -926,6 +983,7 @@ mod tests {
                     | "no-redeclare"
                     | "no-unused-collection"
                     | "no-array-index-key"
+                    | "no-unthrown-error"
             )
         }) {
             assert!(

@@ -8,8 +8,18 @@ pre-release versions such as `0.x.0-beta.1` for testers.
 
 ## [Unreleased]
 
+## [0.1.0-beta.5] - 2026-11-12
+
 ### Added
 
+- **`no-floating-promises`** (typescript-eslint `no-floating-promises`) flags a promise
+  that is neither awaited, ended with `.catch` or a two-argument `.then`, nor marked with
+  `void`. Beyond Promise statics, `fetch`, async IIFEs and same-file async functions, it
+  follows explicit type annotations (parameters, destructuring, `const x: T`, member
+  access) through same-file aliases and interfaces and through relative imports, so
+  `persistence?.onSave(next)` is reported when `onSave` returns `void | Promise<void>` in
+  another file. Type inference, generics, bare specifiers and tsconfig `paths` are not
+  followed.
 - **Four rules** — `no-literal-call` (SonarJS S6958) flags a literal called as a function,
   which always throws a `TypeError` at runtime; `no-useless-increment` (S2123) flags an
   increment or decrement whose result is discarded; `no-generator-without-yield` (S3531)

@@ -608,6 +608,18 @@ pub const RULES: &[Rule] = &[
     },
     Rule {
         meta: RuleMeta {
+            id: "no-floating-promises",
+            description: "Promise-producing expression statement is neither awaited nor handled",
+            title: "Handle the promise",
+            why: "An unhandled promise hides rejections and ordering bugs; await it, add a rejection handler, or mark it with void.",
+            severity: Severity::Warning,
+        },
+        scope: RuleScope::File,
+        requires_scope: true,
+        run: Some(rules::no_floating_promises::run),
+    },
+    Rule {
+        meta: RuleMeta {
             id: "no-gratuitous-expressions",
             description: "Condition contains a self-contradicting or redundant expression",
             title: "Simplify constant conditions",
@@ -853,6 +865,7 @@ mod tests {
             "no-unused-collection",
             "no-element-overwrite",
             "no-ignored-return",
+            "no-floating-promises",
             "no-gratuitous-expressions",
             "no-unthrown-error",
             "no-eval",
@@ -932,6 +945,7 @@ mod tests {
                 "no-unused-collection",
                 "no-element-overwrite",
                 "no-ignored-return",
+                "no-floating-promises",
                 "no-gratuitous-expressions",
                 "no-unthrown-error",
                 "no-eval",
@@ -984,6 +998,7 @@ mod tests {
                     | "no-unused-collection"
                     | "no-array-index-key"
                     | "no-unthrown-error"
+                    | "no-floating-promises"
             )
         }) {
             assert!(

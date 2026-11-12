@@ -28,6 +28,7 @@ pub mod no_empty_catch;
 pub mod no_eval;
 pub mod no_explicit_any;
 pub mod no_fallthrough;
+pub mod no_floating_promises;
 pub mod no_generator_without_yield;
 pub mod no_gratuitous_expressions;
 pub mod no_identical_conditions;

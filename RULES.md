@@ -58,6 +58,7 @@ Every row is addressable as `RULES.md#<rule-id>` (for example `RULES.md#no-conso
 | <a id="no-unused-collection"></a>`no-unused-collection` | code smell | SonarJS S4030 `no-unused-collection`; no direct ESLint core equivalent | Implemented (file-scoped; scope analysis; local array/object/`Map`/`Set` only) |
 | <a id="no-element-overwrite"></a>`no-element-overwrite` | bug | SonarJS `no-element-overwrite`; no direct ESLint core equivalent | Implemented (file-scoped; adjacent statements only) |
 | <a id="no-ignored-return"></a>`no-ignored-return` | bug | SonarJS `no-ignored-return`; no direct ESLint core equivalent (ESLint `no-unused-expressions` is broader) | Implemented (file-scoped; fixed pure-function allowlist) |
+| <a id="no-floating-promises"></a>`no-floating-promises` | bug | typescript-eslint `no-floating-promises`; SonarJS `no-floating-promises` | Implemented (file-scoped; syntax-only, same-file async/`Promise<...>` functions plus `Promise`/`fetch`/`.then`/`.finally` shapes) |
 | <a id="no-gratuitous-expressions"></a>`no-gratuitous-expressions` | bug | SonarJS `no-gratuitous-expressions`; no direct ESLint core equivalent | Implemented (file-scoped; conditions only, identical/negated operands) |
 | <a id="no-unthrown-error"></a>`no-unthrown-error` | bug | SonarJS S3984 `no-unthrown-error`; ESLint `no-unthrown-error` | Implemented (file-scoped; scope analysis; plain `Error` global only, standalone creations and never-thrown bindings) |
 | <a id="no-eval"></a>`no-eval` | security | ESLint `no-eval`; no direct SonarJS equivalent | Implemented (file-scoped; direct calls and common global/member spellings only) |
@@ -129,6 +130,14 @@ These rules are syntax-only by design (no scope analysis, CFG, or type informati
   `JSON.parse`/`stringify`, selected `Object.*`, and `Array.isArray`/`from`/`of`). It never
   infers purity for instance methods, and ignores `await`, `void`, and calls nested in
   larger expressions.
+- `no-floating-promises` has no type information. It reports an expression statement that is
+  `new Promise(...)`, `Promise.all|allSettled|race|any|resolve|reject(...)`, an unshadowed
+  `fetch(...)`, an async IIFE, a call to a same-file function declared `async` or annotated
+  `Promise<...>` (or a union containing it), `this.m()` on such a method of the enclosing
+  class, or a chain ending in `.then(onFulfilled)` (one argument) or `.finally(...)`.
+  Promise-returning functions or members from other files, instance methods on other
+  receivers, and statements built from `,`, `&&`, `||` or `?:` are not detected. `await`,
+  `void`, `.catch(...)` and `.then(a, b)` are never reported.
 - `no-gratuitous-expressions` only inspects `if`, ternary, `while`, `do`/`while`, and `for`
   conditions, and only flags `&&`/`||` expressions whose operands are textually identical
   or where one is the `!` negation of the other. Broader constant-folding and always-true

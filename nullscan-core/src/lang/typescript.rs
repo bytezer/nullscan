@@ -993,6 +993,64 @@ mod tests {
     }
 
     #[test]
+    fn flags_floating_promises() {
+        let f = "async function f() {}\n";
+        for body in [
+            "f();",
+            "(f());",
+            "new Promise((r) => r(1));",
+            "Promise.all([]);",
+            "Promise.allSettled([]);",
+            "Promise.race([]);",
+            "Promise.any([]);",
+            "Promise.resolve(1);",
+            "Promise.reject(1);",
+            "fetch(\"/x\");",
+            "x.then(a);",
+            "x.finally(a);",
+            "(async () => {})();",
+            "(async function () {})();",
+        ] {
+            assert_eq!(rules(&format!("{f}{body}")), vec!["no-floating-promises"], "{body}");
+        }
+        for source in [
+            "const g = async () => {}; g();",
+            "const g = async function () {}; g();",
+            "const g = (): Promise<number> => p; g();",
+            "function g(): Promise<void> | undefined { return p; } g();",
+            "class A { async m() {} n() { this.m(); } }",
+            "class A { m(): Promise<void> { return p; } n() { this.m(); } }",
+        ] {
+            assert_eq!(rules(source), vec!["no-floating-promises"], "{source}");
+        }
+    }
+
+    #[test]
+    fn allows_handled_or_non_statement_promises() {
+        let f = "async function f() {}\n";
+        for body in [
+            "await f();",
+            "void f();",
+            "f().catch(h);",
+            "x.then(a, b);",
+            "f().then(a).catch(h);",
+            "const p = f();",
+            "use(f());",
+            "return f();",
+            "sync();",
+            "x.then();",
+            "a && f();",
+            "a, f();",
+        ] {
+            let source = format!("{f}async function m() {{ {body} }}");
+            assert!(!rules(&source).contains(&"no-floating-promises"), "{body}");
+        }
+        assert!(rules("function g(fetch: () => void) { fetch(); }").is_empty());
+        assert!(rules("function g() {} g();").is_empty());
+        assert!(rules("class A { m() {} n() { this.m(); } }").is_empty());
+    }
+
+    #[test]
     fn flags_gratuitous_conditions() {
         // `no-identical-expressions` also legitimately fires on `a && a`.
         assert_eq!(

@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with
 pre-release versions such as `0.x.0-beta.1` for testers.
 
+## [Unreleased]
+
+### Added
+
+- **Four rules** — `no-literal-call` (SonarJS S6958) flags a literal called as a function,
+  which always throws a `TypeError` at runtime; `no-useless-increment` (S2123) flags an
+  increment or decrement whose result is discarded; `no-generator-without-yield` (S3531)
+  flags a generator that never yields, so it finishes on the first `next()` call; and
+  `no-unthrown-error` (S3984) flags an `Error` that is created and never thrown.
+- **Documentation reference** — `docs/configuration.md` documents every `nullscan.toml`
+  key (type, default, scope and effect), config-file resolution, glob syntax, validation
+  and recipes; `docs/cli.md` covers install, options, exit codes and output formats; and
+  `docs/json.md` specifies the `--format json` contract, including the 0-based UTF-16
+  diagnostic ranges versus the 1-based duplicate line spans.
+- `RULES.md` now has a **Configurable rules** table linking each tunable rule to its key,
+  default and reference section.
+
+### Changed
+
+- Releases build and publish only the two Linux targets
+  (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`) during the beta, cutting macOS
+  and Windows build time; macOS and Windows users can still build from source and point
+  `nullscan.path` at the result.
+- Corrected the VS Code README: inline suppressions are implemented, and the extension
+  documentation now states the Linux-only prebuilt server availability.
+
 ## [0.1.0-beta.4] - 2026-11-06
 
 Real-repository round: more server-side signal, fewer false positives, and a human
